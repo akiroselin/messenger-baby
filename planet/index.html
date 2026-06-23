@@ -73,11 +73,61 @@
       padding: 6px 14px;
       border-radius: 20px;
     }
+
+    /* ============ HUD: status + counter ============ */
+    #hud {
+      position: fixed;
+      top: 18px; right: 18px;
+      z-index: 50;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 8px;
+    }
+    #counter {
+      font-family: inherit;
+      font-size: 13px;
+      letter-spacing: 2px;
+      color: #2c3e50;
+      background: rgba(255,255,255,0.55);
+      padding: 8px 14px;
+      border-radius: 20px;
+      border: 2px solid #2c3e50;
+      box-shadow: 0 3px 0 #2c3e50;
+    }
+    #counter b {
+      color: #C0392B;
+      font-size: 16px;
+    }
+    #status {
+      font-family: inherit;
+      font-size: 14px;
+      letter-spacing: 1.5px;
+      color: #2c3e50;
+      background: #F4B942;
+      padding: 8px 18px;
+      border-radius: 20px;
+      border: 2px solid #2c3e50;
+      box-shadow: 0 3px 0 #2c3e50;
+      opacity: 0;
+      transform: translateY(-6px);
+      transition: opacity 0.3s, transform 0.3s;
+    }
+    #status.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    #status.success { background: #2ECC71; color: white; }
   </style>
 </head>
 <body>
   <div id="loader"><div class="spinner"></div></div>
   <div id="hint">drag to orbit · scroll to zoom</div>
+  <div id="hud">
+    <div id="status"></div>
+    <div id="counter">DELIVERIES · <b>0</b></div>
+  </div>
   <button id="begin">BEGIN</button>
 
   <script type="importmap">
@@ -576,13 +626,97 @@
     scene.add(packageG);
 
     // ============================================================
-    //  Orbit camera
+    //  Floating particles (small white sparkles in the air)
+    // ============================================================
+    const PARTICLE_COUNT = 80;
+    const particleGeo = new THREE.BufferGeometry();
+    const particlePos = new Float32Array(PARTICLE_COUNT * 3);
+    const particleVel = [];
+    for (let i = 0; i < PARTICLE_COUNT; i++) {
+      particlePos[i*3]   = (Math.random() - 0.5) * 30;
+      particlePos[i*3+1] = 2 + Math.random() * 14;
+      particlePos[i*3+2] = (Math.random() - 0.5) * 20;
+      particleVel.push({
+        x: (Math.random() - 0.5) * 0.05,
+        y: 0.1 + Math.random() * 0.2,
+        z: (Math.random() - 0.5) * 0.05,
+        phase: Math.random() * Math.PI * 2,
+      });
+    }
+    particleGeo.setAttribute('position', new THREE.BufferAttribute(particlePos, 3));
+    const particleMat = new THREE.PointsMaterial({
+      color: 0xffffff, size: 0.18, transparent: true, opacity: 0.7, depthWrite: false
+    });
+    const particles = new THREE.Points(particleGeo, particleMat);
+    scene.add(particles);
+
+    // ============================================================
+    //  Confetti pool (reused boxes, spawned on delivery)
+    // ============================================================
+    const confettiColors = [0xE74C3C, 0xF4B942, 0x3498DB, 0x2ECC71, 0x9B59B6, 0xFFFCF2];
+    const confettiPool = [];
+    const CONFETTI_PER_BURST = 36;
+    for (let i = 0; i < CONFETTI_PER_BURST * 3; i++) {
+      const m = new THREE.Mesh(
+        new THREE.BoxGeometry(0.12, 0.18, 0.04),
+        new THREE.MeshLambertMaterial({ color: confettiColors[i % confettiColors.length] })
+      );
+      m.visible = false;
+      m.userData = { vx: 0, vy: 0, vz: 0, life: 0, maxLife: 0, rotAxis: new THREE.Vector3(0,0,1) };
+      scene.add(m);
+      confettiPool.push(m);
+    }
+    function burstConfetti(worldPos) {
+      let spawned = 0;
+      for (const c of confettiPool) {
+        if (spawned >= CONFETTI_PER_BURST) break;
+        if (c.visible) continue;
+        c.position.copy(worldPos);
+        c.rotation.set(0, 0, 0);
+        const a = Math.random() * Math.PI * 2;
+        const upBias = 4 + Math.random() * 3;
+        c.userData.vx = Math.cos(a) * (1.5 + Math.random() * 2);
+        c.userData.vy = upBias;
+        c.userData.vz = Math.sin(a) * (1.5 + Math.random() * 2);
+        c.userData.rotAxis.set(Math.random()-0.5, Math.random()-0.5, Math.random()-0.5).normalize();
+        c.userData.life = 0;
+        c.userData.maxLife = 2.0 + Math.random() * 0.8;
+        c.visible = true;
+        spawned++;
+      }
+    }
+    function updateConfetti(dt) {
+      for (const c of confettiPool) {
+        if (!c.visible) continue;
+        c.userData.life += dt;
+        if (c.userData.life >= c.userData.maxLife) {
+          c.visible = false;
+          continue;
+        }
+        c.userData.vy -= 9.8 * dt; // gravity
+        c.position.x += c.userData.vx * dt;
+        c.position.y += c.userData.vy * dt;
+        c.position.z += c.userData.vz * dt;
+        // bounce on ground
+        if (c.position.y < 0.05) {
+          c.position.y = 0.05;
+          c.userData.vy *= -0.4;
+          c.userData.vx *= 0.7;
+          c.userData.vz *= 0.7;
+        }
+        c.rotateOnAxis(c.userData.rotAxis, dt * 8);
+      }
+    }
+
+    // ============================================================
+    //  Orbit camera (with idle auto-rotate)
     // ============================================================
     let isDragging = false;
     let prevX = 0, prevY = 0;
     let camTheta = 0;
     let camPhi = Math.PI * 0.38;
     let camDist = 22;
+    let lastInteractionTime = performance.now();
     const camTarget = new THREE.Vector3(0, 4, 0);
 
     function updateCamera() {
@@ -594,9 +728,12 @@
     }
     updateCamera();
 
+    function noteInteraction() { lastInteractionTime = performance.now(); }
+
     renderer.domElement.addEventListener('pointerdown', e => {
       isDragging = true;
       prevX = e.clientX; prevY = e.clientY;
+      noteInteraction();
     });
     window.addEventListener('pointerup', () => isDragging = false);
     window.addEventListener('pointermove', e => {
@@ -606,29 +743,103 @@
       camPhi = Math.max(0.2, Math.min(Math.PI * 0.48, camPhi - dy * 0.005));
       prevX = e.clientX; prevY = e.clientY;
       updateCamera();
+      noteInteraction();
     });
     renderer.domElement.addEventListener('wheel', e => {
       e.preventDefault();
       camDist = Math.max(10, Math.min(40, camDist + e.deltaY * 0.02));
       updateCamera();
+      noteInteraction();
     }, { passive: false });
 
     // ============================================================
-    //  BEGIN click → package drop
+    //  BEGIN click → full delivery flow
     // ============================================================
     const beginBtn = document.getElementById('begin');
-    let dropping = false;
-    let dropStartTime = 0;
+    const statusEl = document.getElementById('status');
+    const counterEl = document.getElementById('counter').querySelector('b');
+    let deliveryCount = 0;
 
-    beginBtn.addEventListener('click', () => {
-      if (dropping) return;
-      dropping = true;
+    // Delivery state machine
+    const DELIVERY = { IDLE: 0, DROPPING: 1, WAVING: 2, DELIVERED: 3, RESET: 4 };
+    let deliveryState = DELIVERY.IDLE;
+    let stateStartTime = 0;
+    let chosenCourier = null;  // which courier receives this package
+    let chosenHand = null;     // the hand mesh to raise
+    let handBaseRotZ = 0.25;   // default arm z rotation
+
+    function setStatus(text, success = false) {
+      statusEl.textContent = text;
+      statusEl.classList.toggle('success', success);
+      statusEl.classList.add('show');
+    }
+    function clearStatus() {
+      statusEl.classList.remove('show');
+    }
+
+    // Find a hand to raise (the right hand of chosen courier)
+    function getRightHand(courier) {
+      // right arm + hand are the ones at +x. Walk children: hands are SphereGeometry-named
+      // We can identify by geometry: CylinderGeometry arm vs SphereGeometry hand
+      // Simpler: the right hand is the 5th child-ish mesh (after head, body, cap, etc.)
+      // Even simpler: tag them at build time — but we built courier before this code.
+      // Use position.x > 0.2 to find right-side meshes.
+      let hand = null, arm = null;
+      courier.traverse(o => {
+        if (!o.isMesh) return;
+        if (o.position.x > 0.2 && o.geometry.type === 'SphereGeometry') hand = o;
+        if (o.position.x > 0.2 && o.geometry.type === 'CylinderGeometry') arm = o;
+      });
+      return { hand, arm };
+    }
+
+    function startDelivery() {
+      if (deliveryState !== DELIVERY.IDLE) return;
+      deliveryState = DELIVERY.DROPPING;
+      stateStartTime = performance.now();
       beginBtn.classList.add('hidden');
       packageG.visible = true;
-      packageG.position.set(0, 30, 0);
+      packageG.position.set(
+        (Math.random() - 0.5) * 4,
+        30, 0
+      );
       packageG.rotation.set(0, 0, 0);
-      dropStartTime = performance.now();
-    });
+      chosenCourier = (Math.random() < 0.5) ? courier1 : courier2;
+      const { hand, arm } = getRightHand(chosenCourier);
+      chosenHand = { hand, arm };
+      setStatus('Delivering…');
+    }
+
+    function landPackage() {
+      deliveryState = DELIVERY.WAVING;
+      stateStartTime = performance.now();
+      // burst confetti at the package position
+      burstConfetti(packageG.position);
+    }
+
+    function completeDelivery() {
+      deliveryState = DELIVERY.DELIVERED;
+      stateStartTime = performance.now();
+      deliveryCount++;
+      counterEl.textContent = deliveryCount;
+      setStatus('Delivered! ✦', true);
+    }
+
+    function resetDelivery() {
+      deliveryState = DELIVERY.IDLE;
+      stateStartTime = 0;
+      packageG.visible = false;
+      // lower the hand back
+      if (chosenHand && chosenHand.arm) {
+        chosenHand.arm.rotation.z = handBaseRotZ;
+      }
+      chosenCourier = null;
+      chosenHand = null;
+      beginBtn.classList.remove('hidden');
+      setTimeout(clearStatus, 1200);
+    }
+
+    beginBtn.addEventListener('click', startDelivery);
 
     // ============================================================
     //  Animation loop
@@ -651,11 +862,8 @@
       // chibi couriers bob up and down (idle animation)
       for (const c of allCouriers) {
         if (c.userData.isCourier) {
-          const baseY = c.position.y;
-          // we need to remember baseY — set once
-          if (c.userData.baseY === undefined) c.userData.baseY = baseY;
+          if (c.userData.baseY === undefined) c.userData.baseY = c.position.y;
           c.position.y = c.userData.baseY + Math.sin(t * 2.5 + c.userData.bobPhase) * 0.05;
-          // slight arm sway — but for simplicity, just bob
         }
       }
 
@@ -665,16 +873,64 @@
         if (c.position.x > 22) c.position.x = -22;
       }
 
-      // package drop
-      if (dropping) {
-        const elapsed = (performance.now() - dropStartTime) / 1000;
+      // floating particles (drift up + sway)
+      const ppos = particles.geometry.attributes.position;
+      for (let i = 0; i < PARTICLE_COUNT; i++) {
+        const v = particleVel[i];
+        ppos.array[i*3]   += v.x * dt + Math.sin(t + v.phase) * dt * 0.15;
+        ppos.array[i*3+1] += v.y * dt;
+        ppos.array[i*3+2] += v.z * dt;
+        // wrap around
+        if (ppos.array[i*3+1] > 18) ppos.array[i*3+1] = 2;
+        if (ppos.array[i*3] > 16)  ppos.array[i*3] = -16;
+        if (ppos.array[i*3] < -16) ppos.array[i*3] = 16;
+      }
+      ppos.needsUpdate = true;
+
+      // confetti physics
+      updateConfetti(dt);
+
+      // idle camera auto-rotate (after 4s of no interaction)
+      if (!isDragging && deliveryState === DELIVERY.IDLE) {
+        const idleMs = performance.now() - lastInteractionTime;
+        if (idleMs > 4000) {
+          camTheta -= dt * 0.12;
+          updateCamera();
+        }
+      }
+
+      // delivery state machine
+      if (deliveryState === DELIVERY.DROPPING) {
+        const elapsed = (performance.now() - stateStartTime) / 1000;
         const fall = elapsed * 14;
         packageG.position.y = Math.max(PLANET_R + 0.5, 30 - fall);
         packageG.rotation.y += dt * 4;
         packageG.rotation.x += dt * 2;
         if (packageG.position.y <= PLANET_R + 0.55) {
-          dropping = false;
-          packageG.position.y = PLANET_R + 0.5;
+          landPackage();
+        }
+      } else if (deliveryState === DELIVERY.WAVING) {
+        const elapsed = (performance.now() - stateStartTime) / 1000;
+        // raise the right arm: rotate.z from 0.25 to -1.5 over 0.4s
+        if (chosenHand && chosenHand.arm) {
+          const k = Math.min(1, elapsed / 0.4);
+          const eased = 1 - Math.pow(1 - k, 3);
+          chosenHand.arm.rotation.z = handBaseRotZ + (-1.5 - handBaseRotZ) * eased;
+        }
+        if (elapsed > 0.6) {
+          completeDelivery();
+        }
+      } else if (deliveryState === DELIVERY.DELIVERED) {
+        const elapsed = (performance.now() - stateStartTime) / 1000;
+        // hide package after 1.2s and reset
+        if (elapsed > 1.4) {
+          deliveryState = DELIVERY.RESET;
+          stateStartTime = performance.now();
+        }
+      } else if (deliveryState === DELIVERY.RESET) {
+        const elapsed = (performance.now() - stateStartTime) / 1000;
+        if (elapsed > 0.3) {
+          resetDelivery();
         }
       }
 
