@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Messenger — Baby Versions</title>
+  <style>
+    html, body {
+      margin: 0; padding: 0;
+      width: 100%; height: 100%;
+      background: #4ECDC4;
+      font-family: 'Courier New', monospace;
+      -webkit-font-smoothing: antialiased;
+      color: #2c3e50;
+    }
+    body {
+      display: flex; align-items: center; justify-content: center;
+      flex-direction: column;
+      padding: 40px 20px;
+      box-sizing: border-box;
+    }
+    h1 {
+      font-size: 32px;
+      margin: 0 0 8px;
+      letter-spacing: 4px;
+    }
+    p.subtitle {
+      margin: 0 0 40px;
+      font-size: 13px;
+      opacity: 0.7;
+      letter-spacing: 1px;
+    }
+    .grid {
+      display: flex;
+      gap: 30px;
+      max-width: 900px;
+      width: 100%;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    .card {
+      flex: 1 1 300px;
+      max-width: 380px;
+      background: rgba(255,255,255,0.15);
+      border: 3px solid #2c3e50;
+      border-radius: 8px;
+      padding: 30px 24px;
+      text-align: center;
+      text-decoration: none;
+      color: #2c3e50;
+      transition: transform 0.15s, background 0.15s, box-shadow 0.15s;
+      box-shadow: 0 6px 0 #2c3e50;
+    }
+    .card:hover {
+      background: rgba(255,255,255,0.25);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 0 #2c3e50;
+    }
+    .card:active {
+      transform: translateY(2px);
+      box-shadow: 0 3px 0 #2c3e50;
+    }
+    .card h2 {
+      font-size: 22px;
+      margin: 0 0 10px;
+      letter-spacing: 2px;
+    }
+    .card p {
+      font-size: 13px;
+      line-height: 1.6;
+      margin: 0 0 16px;
+      opacity: 0.85;
+    }
+    .badge {
+      display: inline-block;
+      padding: 4px 10px;
+      background: #F4B942;
+      color: #2c3e50;
+      font-size: 11px;
+      font-weight: bold;
+      letter-spacing: 1px;
+      border-radius: 12px;
+      border: 2px solid #2c3e50;
+    }
+    .arrow {
+      margin-top: 20px;
+      font-size: 20px;
+      font-weight: bold;
+    }
+    footer {
+      margin-top: 50px;
+      font-size: 11px;
+      opacity: 0.6;
+      text-align: center;
+    }
+    footer a { color: #2c3e50; }
+  </style>
+</head>
+<body>
+  <h1>MESSENGER · BABY</h1>
+  <p class="subtitle">a tiny clone of <a href="https://messenger.abeto.co/" style="color:#2c3e50;">messenger.abeto.co</a> · three.js · single-file</p>
+
+  <div class="grid">
+    <a class="card" href="./planet/">
+      <span class="badge">LATEST</span>
+      <h2>PLANET</h2>
+      <p>round earth · Q版 chibi courier · cute little world</p>
+      <div class="arrow">→</div>
+    </a>
+    <a class="card" href="./flat/">
+      <span class="badge">v1</span>
+      <h2>FLAT ISLAND</h2>
+      <p>floating block · voxel trees · simple first attempt</p>
+      <div class="arrow">→</div>
+    </a>
+  </div>
+
+  <footer>
+    single-html · three.js 0.160 · vercel-deployable · <a href="https://github.com/akiroselin/messenger-baby">github</a>
+  </footer>
+</body>
+</html>

@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Messenger — Planet Baby</title>
+  <style>
+    html, body {
+      margin: 0; padding: 0;
+      width: 100%; height: 100%;
+      overflow: hidden;
+      background: #4ECDC4;
+      font-family: 'Courier New', monospace;
+      -webkit-font-smoothing: antialiased;
+    }
+    canvas { display: block; }
+
+    #loader {
+      position: fixed; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      background: #4ECDC4;
+      z-index: 100;
+      transition: opacity 0.6s ease-out;
+      pointer-events: none;
+    }
+    #loader.hidden { opacity: 0; }
+    #loader .spinner {
+      width: 48px; height: 48px;
+      border: 4px solid rgba(255,255,255,0.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #begin {
+      position: fixed;
+      left: 50%; bottom: 8%;
+      transform: translateX(-50%);
+      padding: 14px 38px;
+      font-family: inherit;
+      font-size: 22px;
+      font-weight: bold;
+      letter-spacing: 2px;
+      color: #2c3e50;
+      background: #F4B942;
+      border: 3px solid #2c3e50;
+      border-radius: 4px;
+      box-shadow: 0 4px 0 #2c3e50, 0 6px 12px rgba(0,0,0,0.2);
+      cursor: pointer;
+      z-index: 50;
+      transition: transform 0.1s, box-shadow 0.1s;
+      user-select: none;
+    }
+    #begin:hover { background: #FFC857; }
+    #begin:active {
+      transform: translateX(-50%) translateY(2px);
+      box-shadow: 0 2px 0 #2c3e50, 0 3px 6px rgba(0,0,0,0.2);
+    }
+    #begin.hidden { opacity: 0; pointer-events: none; transition: opacity 0.5s; }
+
+    #hint {
+      position: fixed;
+      top: 18px; left: 50%;
+      transform: translateX(-50%);
+      color: #2c3e50;
+      font-size: 13px;
+      letter-spacing: 1px;
+      opacity: 0.75;
+      z-index: 50;
+      pointer-events: none;
+      background: rgba(255,255,255,0.4);
+      padding: 6px 14px;
+      border-radius: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div id="loader"><div class="spinner"></div></div>
+  <div id="hint">drag to orbit · scroll to zoom</div>
+  <button id="begin">BEGIN</button>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+    }
+  }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+
+    // ============================================================
+    //  5x5 pixel patterns for voxel letters
+    // ============================================================
+    const LETTERS = {
+      M: [[1,0,0,0,1],[1,0,0,0,1],[1,1,0,1,1],[1,0,1,0,1],[1,0,0,0,1]],
+      E: [[1,1,1,1,1],[1,0,0,0,0],[1,1,1,1,0],[1,0,0,0,0],[1,1,1,1,1]],
+      S: [[0,1,1,1,1],[1,0,0,0,0],[0,1,1,1,0],[0,0,0,0,1],[1,1,1,1,0]],
+      N: [[1,0,0,0,1],[1,1,0,0,1],[1,0,1,0,1],[1,0,0,1,1],[1,0,0,0,1]],
+      G: [[0,1,1,1,1],[1,0,0,0,0],[1,0,1,1,1],[1,0,0,0,1],[0,1,1,1,0]],
+      R: [[1,1,1,1,0],[1,0,0,0,1],[1,1,1,1,0],[1,0,1,0,0],[1,0,0,1,1]],
+    };
+
+    // ============================================================
+    //  Scene
+    // ============================================================
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x4ECDC4);
+    scene.fog = new THREE.Fog(0x4ECDC4, 30, 70);
+
+    const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.1, 200);
+    camera.position.set(0, 8, 22);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    document.body.appendChild(renderer.domElement);
+
+    // ---- lights ----
+    scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+    const sun = new THREE.DirectionalLight(0xfff4d6, 1.3);
+    sun.position.set(10, 16, 8);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(1024, 1024);
+    sun.shadow.camera.left = -12;
+    sun.shadow.camera.right = 12;
+    sun.shadow.camera.top = 12;
+    sun.shadow.camera.bottom = -12;
+    scene.add(sun);
+    const fill = new THREE.DirectionalLight(0xb6dcff, 0.35);
+    fill.position.set(-6, 4, -4);
+    scene.add(fill);
+
+    // ============================================================
+    //  Planet (small world)
+    // ============================================================
+    const PLANET_R = 5;
+    const planetGroup = new THREE.Group();
+    scene.add(planetGroup);
+
+    // Grass sphere
+    const planet = new THREE.Mesh(
+      new THREE.SphereGeometry(PLANET_R, 48, 32),
+      new THREE.MeshLambertMaterial({ color: 0x7DCB6A })
+    );
+    planet.castShadow = true;
+    planet.receiveShadow = true;
+    planetGroup.add(planet);
+
+    // Brown soil rim around equator
+    const rim = new THREE.Mesh(
+      new THREE.TorusGeometry(PLANET_R * 1.005, 0.35, 8, 48),
+      new THREE.MeshLambertMaterial({ color: 0x8B5A2B })
+    );
+    rim.rotation.x = Math.PI / 2;
+    rim.castShadow = true;
+    planetGroup.add(rim);
+
+    // ============================================================
+    //  Q版 helpers — put an object on the sphere surface
+    // ============================================================
+    function placeOnPlanet(group, localX, localZ, rotY = 0) {
+      const r2 = localX * localX + localZ * localZ;
+      const y = Math.sqrt(Math.max(0, PLANET_R * PLANET_R - r2));
+      group.position.set(localX, y - 0.05, localZ);
+      group.rotation.y = rotY;
+      planetGroup.add(group);
+    }
+
+    // ============================================================
+    //  Q版 chibi tree — round, oversized leaves
+    // ============================================================
+    function makeChibiTree(scale = 1) {
+      const g = new THREE.Group();
+      const trunkMat = new THREE.MeshLambertMaterial({ color: 0x8B5A2B });
+      const leafMat = new THREE.MeshLambertMaterial({ color: 0x4FA85C });
+
+      // Chunky trunk
+      const trunk = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.18 * scale, 0.24 * scale, 0.55 * scale, 6),
+        trunkMat
+      );
+      trunk.position.y = 0.27 * scale;
+      trunk.castShadow = true;
+      g.add(trunk);
+
+      // Three overlapping spheres for the leaf cluster (chibi round look)
+      const positions = [
+        [0, 0.75, 0, 0.55],
+        [-0.25, 0.6, 0.15, 0.42],
+        [0.22, 0.55, -0.18, 0.45],
+      ];
+      for (const [x, y, z, r] of positions) {
+        const leaf = new THREE.Mesh(
+          new THREE.SphereGeometry(r * scale, 10, 8),
+          leafMat
+        );
+        leaf.position.set(x * scale, y * scale, z * scale);
+        leaf.castShadow = true;
+        g.add(leaf);
+      }
+      return g;
+    }
+
+    // ============================================================
+    //  Q版 chibi house — blocky with oversized door
+    // ============================================================
+    function makeChibiHouse() {
+      const g = new THREE.Group();
+      // Walls — slightly squat, cream
+      const wall = new THREE.Mesh(
+        new THREE.BoxGeometry(1.2, 0.85, 1.0),
+        new THREE.MeshLambertMaterial({ color: 0xFFE6CC })
+      );
+      wall.position.y = 0.425;
+      wall.castShadow = true;
+      wall.receiveShadow = true;
+      g.add(wall);
+
+      // Red roof — pyramid
+      const roof = new THREE.Mesh(
+        new THREE.ConeGeometry(0.95, 0.7, 4),
+        new THREE.MeshLambertMaterial({ color: 0xE74C3C, flatShading: true })
+      );
+      roof.position.y = 1.2;
+      roof.rotation.y = Math.PI / 4;
+      roof.castShadow = true;
+      g.add(roof);
+
+      // Big door (chibi proportion)
+      const door = new THREE.Mesh(
+        new THREE.BoxGeometry(0.36, 0.55, 0.05),
+        new THREE.MeshLambertMaterial({ color: 0x6B3F1D })
+      );
+      door.position.set(0, 0.3, 0.52);
+      g.add(door);
+
+      // Round window (cute)
+      const win = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.18, 0.18, 0.06, 12),
+        new THREE.MeshLambertMaterial({ color: 0x87CEEB })
+      );
+      win.rotation.x = Math.PI / 2;
+      win.position.set(0.35, 0.55, 0.52);
+      g.add(win);
+      // Window cross
+      const winFrame = new THREE.Mesh(
+        new THREE.BoxGeometry(0.04, 0.36, 0.07),
+        new THREE.MeshLambertMaterial({ color: 0xFFE6CC })
+      );
+      winFrame.position.set(0.35, 0.55, 0.52);
+      g.add(winFrame);
+
+      // Chimney
+      const chimney = new THREE.Mesh(
+        new THREE.BoxGeometry(0.18, 0.35, 0.18),
+        new THREE.MeshLambertMaterial({ color: 0xB0B0B0 })
+      );
+      chimney.position.set(-0.35, 1.35, 0);
+      chimney.castShadow = true;
+      g.add(chimney);
+      return g;
+    }
+
+    // ============================================================
+    //  Q版 chibi courier character — big head, tiny body
+    // ============================================================
+    function makeChibiCourier() {
+      const g = new THREE.Group();
+      const skin = new THREE.MeshLambertMaterial({ color: 0xFCD7B6 });
+      const uniform = new THREE.MeshLambertMaterial({ color: 0x3498DB });
+      const pants = new THREE.MeshLambertMaterial({ color: 0x2C3E50 });
+      const cap = new THREE.MeshLambertMaterial({ color: 0xE74C3C });
+
+      // Body (small)
+      const body = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.22, 0.28, 0.45, 8),
+        uniform
+      );
+      body.position.y = 0.45;
+      body.castShadow = true;
+      g.add(body);
+
+      // Head (BIG for chibi ratio, ~1.5x body height)
+      const head = new THREE.Mesh(
+        new THREE.SphereGeometry(0.38, 14, 12),
+        skin
+      );
+      head.position.y = 1.0;
+      head.castShadow = true;
+      g.add(head);
+
+      // Cap (red baseball cap, easier to spot)
+      const capTop = new THREE.Mesh(
+        new THREE.SphereGeometry(0.4, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2),
+        cap
+      );
+      capTop.position.y = 1.18;
+      g.add(capTop);
+      // Cap brim
+      const brim = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.4, 0.4, 0.06, 12, 1, false, 0, Math.PI),
+        cap
+      );
+      brim.rotation.x = -Math.PI / 2;
+      brim.rotation.z = -Math.PI / 2;
+      brim.position.set(0, 1.18, 0.2);
+      g.add(brim);
+
+      // Eyes (tiny black dots)
+      for (const sx of [-0.13, 0.13]) {
+        const eye = new THREE.Mesh(
+          new THREE.SphereGeometry(0.05, 8, 6),
+          new THREE.MeshLambertMaterial({ color: 0x1a1a1a })
+        );
+        eye.position.set(sx, 1.05, 0.34);
+        g.add(eye);
+      }
+      // Smile
+      const smile = new THREE.Mesh(
+        new THREE.BoxGeometry(0.14, 0.025, 0.03),
+        new THREE.MeshLambertMaterial({ color: 0xC0392B })
+      );
+      smile.position.set(0, 0.92, 0.36);
+      g.add(smile);
+
+      // Arms
+      for (const sx of [-1, 1]) {
+        const arm = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.08, 0.08, 0.42, 6),
+          uniform
+        );
+        arm.position.set(sx * 0.28, 0.5, 0);
+        arm.rotation.z = sx * 0.25;
+        arm.castShadow = true;
+        g.add(arm);
+        // Hand (small skin sphere)
+        const hand = new THREE.Mesh(
+          new THREE.SphereGeometry(0.09, 8, 6),
+          skin
+        );
+        hand.position.set(sx * 0.32, 0.28, 0.05);
+        g.add(hand);
+      }
+
+      // Legs
+      for (const sx of [-1, 1]) {
+        const leg = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.11, 0.11, 0.3, 6),
+          pants
+        );
+        leg.position.set(sx * 0.12, 0.1, 0);
+        leg.castShadow = true;
+        g.add(leg);
+        // Shoe
+        const shoe = new THREE.Mesh(
+          new THREE.BoxGeometry(0.2, 0.1, 0.28),
+          new THREE.MeshLambertMaterial({ color: 0x6B3F1D })
+        );
+        shoe.position.set(sx * 0.12, -0.05, 0.04);
+        g.add(shoe);
+      }
+
+      // Package in right hand
+      const pkg = new THREE.Mesh(
+        new THREE.BoxGeometry(0.28, 0.28, 0.28),
+        new THREE.MeshLambertMaterial({ color: 0xC99A4B })
+      );
+      pkg.position.set(0.32, 0.5, 0.1);
+      pkg.castShadow = true;
+      g.add(pkg);
+      // Ribbon
+      const ribbonH = new THREE.Mesh(
+        new THREE.BoxGeometry(0.30, 0.08, 0.30),
+        new THREE.MeshLambertMaterial({ color: 0xC0392B })
+      );
+      ribbonH.position.copy(pkg.position);
+      g.add(ribbonH);
+      const ribbonV = new THREE.Mesh(
+        new THREE.BoxGeometry(0.30, 0.30, 0.08),
+        new THREE.MeshLambertMaterial({ color: 0xC0392B })
+      );
+      ribbonV.position.copy(pkg.position);
+      g.add(ribbonV);
+
+      return g;
+    }
+
+    // ============================================================
+    //  Place chibi decorations on the planet top
+    // ============================================================
+    // All positions are LOCAL to planetGroup, near the top hemisphere
+    const treeA = makeChibiTree(0.85);
+    placeOnPlanet(treeA, 1.6, 1.2, -0.3);
+
+    const treeB = makeChibiTree(1.0);
+    placeOnPlanet(treeB, -2.2, 1.6, 1.2);
+
+    const treeC = makeChibiTree(0.7);
+    placeOnPlanet(treeC, 2.3, -0.5, 0.4);
+
+    const treeD = makeChibiTree(0.9);
+    placeOnPlanet(treeD, -1.4, -2.4, -1.0);
+
+    const house = makeChibiHouse();
+    placeOnPlanet(house, 0.0, 2.2, 0);
+
+    // Two couriers (with subtle idle animation flags)
+    const courier1 = makeChibiCourier();
+    placeOnPlanet(courier1, -0.2, -0.6, Math.PI * 0.85);
+    courier1.userData.bobPhase = 0;
+    courier1.userData.isCourier = true;
+
+    const courier2 = makeChibiCourier();
+    placeOnPlanet(courier2, 1.4, -1.6, Math.PI * 0.2);
+    courier2.userData.bobPhase = Math.PI;
+    courier2.userData.isCourier = true;
+
+    // Small rocks scattered on top
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      const r = 2.5 + Math.random() * 1.8;
+      const lx = Math.cos(a) * r;
+      const lz = Math.sin(a) * r;
+      const rock = new THREE.Mesh(
+        new THREE.DodecahedronGeometry(0.12 + Math.random() * 0.18, 0),
+        new THREE.MeshLambertMaterial({ color: 0x9AA0A6, flatShading: true })
+      );
+      rock.castShadow = true;
+      placeOnPlanet(rock, lx, lz, Math.random() * Math.PI);
+    }
+
+    // Tiny grass tufts (clover-like) for extra cuteness
+    const tuftMat = new THREE.MeshLambertMaterial({ color: 0x9CD96A });
+    for (let i = 0; i < 14; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = 1.0 + Math.random() * 3.2;
+      const lx = Math.cos(a) * r;
+      const lz = Math.sin(a) * r;
+      const tuft = new THREE.Mesh(
+        new THREE.SphereGeometry(0.12, 6, 4),
+        tuftMat
+      );
+      // squash it to look like a tuft
+      tuft.scale.set(1, 0.4, 1);
+      placeOnPlanet(tuft, lx, lz, Math.random() * Math.PI);
+    }
+
+    // ============================================================
+    //  Voxel letters "MESSENGER" in a 3x3 grid ABOVE the planet
+    // ============================================================
+    const PIXEL = 0.5;
+    const SPACING = 0.6;
+    const ROW_GAP = 0.7;
+    const letterW = 5 * PIXEL;
+    const letterH = 5 * PIXEL;
+    const GRID = [
+      ['M','E','S'],
+      ['S','E','N'],
+      ['G','E','R'],
+    ];
+
+    const letterMat = new THREE.MeshLambertMaterial({
+      color: 0xFFFCF2
+    });
+    const letterEdgeMat = new THREE.MeshLambertMaterial({
+      color: 0x1a2632
+    });
+
+    const lettersGroup = new THREE.Group();
+    const pixelGeo = new THREE.BoxGeometry(PIXEL, PIXEL, PIXEL);
+
+    function buildLetter(char, baseX, baseY) {
+      const pat = LETTERS[char];
+      if (!pat) return;
+      const g = new THREE.Group();
+      for (let r = 0; r < 5; r++) {
+        for (let c = 0; c < 5; c++) {
+          if (pat[r][c]) {
+            // front face (letter color)
+            const m = new THREE.Mesh(pixelGeo, letterMat);
+            m.position.set(
+              baseX + (c - 2) * PIXEL,
+              baseY + (2 - r) * PIXEL,
+              PIXEL * 0.5
+            );
+            m.castShadow = true;
+            g.add(m);
+            // back face (dark)
+            const back = new THREE.Mesh(pixelGeo, letterEdgeMat);
+            back.position.set(
+              baseX + (c - 2) * PIXEL,
+              baseY + (2 - r) * PIXEL,
+              -PIXEL * 0.5
+            );
+            g.add(back);
+            // middle layer (dark, gives depth)
+            const mid = new THREE.Mesh(pixelGeo, letterEdgeMat);
+            mid.position.set(
+              baseX + (c - 2) * PIXEL,
+              baseY + (2 - r) * PIXEL,
+              0
+            );
+            g.add(mid);
+          }
+        }
+      }
+      return g;
+    }
+
+    const totalW = 3 * letterW + 2 * SPACING;
+    const totalH = 3 * letterH + 2 * ROW_GAP;
+    const startX = -totalW / 2 + letterW / 2;
+    const startY = totalH / 2 - letterH / 2 + 9.0;  // high above the planet
+
+    const allLetterMeshes = [];
+    for (let row = 0; row < 3; row++) {
+      for (let col = 0; col < 3; col++) {
+        const ch = GRID[row][col];
+        const x = startX + col * (letterW + SPACING);
+        const y = startY - row * (letterH + ROW_GAP);
+        const letterG = buildLetter(ch, x, y);
+        if (letterG) {
+          lettersGroup.add(letterG);
+          letterG.traverse(o => { if (o.isMesh) allLetterMeshes.push(o); });
+        }
+      }
+    }
+    // tilt the whole letter grid slightly forward so it faces the camera better
+    lettersGroup.rotation.x = -0.08;
+    scene.add(lettersGroup);
+
+    // ============================================================
+    //  Drifting clouds (world space, not parented to planet)
+    // ============================================================
+    const cloudMat = new THREE.MeshLambertMaterial({ color: 0xffffff, flatShading: true });
+    const clouds = [];
+    for (let i = 0; i < 6; i++) {
+      const cloud = new THREE.Group();
+      for (let j = 0; j < 4; j++) {
+        const s = new THREE.Mesh(
+          new THREE.DodecahedronGeometry(0.5 + Math.random() * 0.4),
+          cloudMat
+        );
+        s.position.set((j - 1.5) * 0.7, Math.random() * 0.2, Math.random() * 0.3);
+        cloud.add(s);
+      }
+      cloud.position.set(
+        (Math.random() - 0.5) * 35,
+        10 + Math.random() * 6,
+        -10 - Math.random() * 8
+      );
+      cloud.userData.driftSpeed = 0.3 + Math.random() * 0.3;
+      scene.add(cloud);
+      clouds.push(cloud);
+    }
+
+    // ============================================================
+    //  Package (for BEGIN drop animation, world space)
+    // ============================================================
+    const packageG = new THREE.Group();
+    const boxMat = new THREE.MeshLambertMaterial({ color: 0xC99A4B });
+    const ribbonMat = new THREE.MeshLambertMaterial({ color: 0xC0392B });
+    const pkgBox = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.6), boxMat);
+    pkgBox.castShadow = true;
+    packageG.add(pkgBox);
+    const ribbonH = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.15, 0.62), ribbonMat);
+    const ribbonV = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.62, 0.15), ribbonMat);
+    packageG.add(ribbonH); packageG.add(ribbonV);
+    packageG.position.set(0, 30, 0);
+    packageG.visible = false;
+    scene.add(packageG);
+
+    // ============================================================
+    //  Orbit camera
+    // ============================================================
+    let isDragging = false;
+    let prevX = 0, prevY = 0;
+    let camTheta = 0;
+    let camPhi = Math.PI * 0.38;
+    let camDist = 22;
+    const camTarget = new THREE.Vector3(0, 4, 0);
+
+    function updateCamera() {
+      const x = camTarget.x + camDist * Math.sin(camPhi) * Math.sin(camTheta);
+      const y = camTarget.y + camDist * Math.cos(camPhi);
+      const z = camTarget.z + camDist * Math.sin(camPhi) * Math.cos(camTheta);
+      camera.position.set(x, y, z);
+      camera.lookAt(camTarget);
+    }
+    updateCamera();
+
+    renderer.domElement.addEventListener('pointerdown', e => {
+      isDragging = true;
+      prevX = e.clientX; prevY = e.clientY;
+    });
+    window.addEventListener('pointerup', () => isDragging = false);
+    window.addEventListener('pointermove', e => {
+      if (!isDragging) return;
+      const dx = e.clientX - prevX, dy = e.clientY - prevY;
+      camTheta -= dx * 0.005;
+      camPhi = Math.max(0.2, Math.min(Math.PI * 0.48, camPhi - dy * 0.005));
+      prevX = e.clientX; prevY = e.clientY;
+      updateCamera();
+    });
+    renderer.domElement.addEventListener('wheel', e => {
+      e.preventDefault();
+      camDist = Math.max(10, Math.min(40, camDist + e.deltaY * 0.02));
+      updateCamera();
+    }, { passive: false });
+
+    // ============================================================
+    //  BEGIN click → package drop
+    // ============================================================
+    const beginBtn = document.getElementById('begin');
+    let dropping = false;
+    let dropStartTime = 0;
+
+    beginBtn.addEventListener('click', () => {
+      if (dropping) return;
+      dropping = true;
+      beginBtn.classList.add('hidden');
+      packageG.visible = true;
+      packageG.position.set(0, 30, 0);
+      packageG.rotation.set(0, 0, 0);
+      dropStartTime = performance.now();
+    });
+
+    // ============================================================
+    //  Animation loop
+    // ============================================================
+    const clock = new THREE.Clock();
+    const allCouriers = [courier1, courier2];
+
+    function tick() {
+      const t = clock.getElapsedTime();
+      const dt = clock.getDelta();
+
+      // slowly rotate the planet
+      planetGroup.rotation.y += dt * 0.15;
+
+      // gentle letter wave
+      for (const m of allLetterMeshes) {
+        m.position.y += Math.sin(t * 1.5 + m.position.x * 0.4) * 0.001;
+      }
+
+      // chibi couriers bob up and down (idle animation)
+      for (const c of allCouriers) {
+        if (c.userData.isCourier) {
+          const baseY = c.position.y;
+          // we need to remember baseY — set once
+          if (c.userData.baseY === undefined) c.userData.baseY = baseY;
+          c.position.y = c.userData.baseY + Math.sin(t * 2.5 + c.userData.bobPhase) * 0.05;
+          // slight arm sway — but for simplicity, just bob
+        }
+      }
+
+      // drift clouds
+      for (const c of clouds) {
+        c.position.x += c.userData.driftSpeed * dt;
+        if (c.position.x > 22) c.position.x = -22;
+      }
+
+      // package drop
+      if (dropping) {
+        const elapsed = (performance.now() - dropStartTime) / 1000;
+        const fall = elapsed * 14;
+        packageG.position.y = Math.max(PLANET_R + 0.5, 30 - fall);
+        packageG.rotation.y += dt * 4;
+        packageG.rotation.x += dt * 2;
+        if (packageG.position.y <= PLANET_R + 0.55) {
+          dropping = false;
+          packageG.position.y = PLANET_R + 0.5;
+        }
+      }
+
+      renderer.render(scene, camera);
+    }
+
+    // hide loader on first frame
+    let firstFrameDone = false;
+    function loop() {
+      tick();
+      if (!firstFrameDone) {
+        firstFrameDone = true;
+        requestAnimationFrame(() => {
+          document.getElementById('loader').classList.add('hidden');
+        });
+      }
+      requestAnimationFrame(loop);
+    }
+    loop();
+
+    // resize
+    window.addEventListener('resize', () => {
+      camera.aspect = innerWidth / innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight);
+    });
+  </script>
+</body>
+</html>
