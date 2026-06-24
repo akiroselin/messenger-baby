@@ -133,7 +133,7 @@
   <script type="importmap">
   {
     "imports": {
-      "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+      "three": "./three.module.js"
     }
   }
   </script>
@@ -169,6 +169,18 @@
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     document.body.appendChild(renderer.domElement);
+
+    // Fallback: if WebGL is not available, hide loader and show a friendly
+    // message instead of leaving the user staring at a spinner.
+    if (!renderer.getContext()) {
+      const loader = document.getElementById('loader');
+      if (loader) loader.style.display = 'none';
+      const hint = document.createElement('div');
+      hint.style.cssText = 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;font-family:inherit;color:#2c3e50;text-align:center;padding:40px;';
+      hint.innerHTML = '<h2 style="letter-spacing:2px;margin:0 0 12px">WebGL not available</h2><p style="opacity:0.7;max-width:420px;line-height:1.5">This 3D scene needs a WebGL-capable browser. Try Chrome, Firefox, Safari, or Edge on a desktop or modern mobile device.</p>';
+      document.body.appendChild(hint);
+      throw new Error('WebGL not supported');
+    }
 
     // ---- lights ----
     scene.add(new THREE.AmbientLight(0xffffff, 0.7));
@@ -317,6 +329,266 @@
     }
 
     // ============================================================
+    //  Q版 chibi tower — tall narrow white building with antenna
+    //  (inspired by the tall white tower in the original)
+    // ============================================================
+    function makeChibiTower() {
+      const g = new THREE.Group();
+      // Tall narrow walls
+      const wall = new THREE.Mesh(
+        new THREE.BoxGeometry(0.7, 1.8, 0.7),
+        new THREE.MeshLambertMaterial({ color: 0xECF0F1 })
+      );
+      wall.position.y = 0.9;
+      wall.castShadow = true; wall.receiveShadow = true;
+      g.add(wall);
+
+      // Pyramid roof
+      const roof = new THREE.Mesh(
+        new THREE.ConeGeometry(0.55, 0.5, 4),
+        new THREE.MeshLambertMaterial({ color: 0xC0392B, flatShading: true })
+      );
+      roof.position.y = 2.05;
+      roof.rotation.y = Math.PI / 4;
+      roof.castShadow = true;
+      g.add(roof);
+
+      // Antenna (thin tall rod + ball on top)
+      const rod = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.025, 0.025, 0.6, 4),
+        new THREE.MeshLambertMaterial({ color: 0x2C3E50 })
+      );
+      rod.position.y = 2.6;
+      g.add(rod);
+      const ball = new THREE.Mesh(
+        new THREE.SphereGeometry(0.07, 8, 6),
+        new THREE.MeshLambertMaterial({ color: 0xE74C3C })
+      );
+      ball.position.y = 2.95;
+      g.add(ball);
+
+      // Two stacked windows
+      const winMat = new THREE.MeshLambertMaterial({ color: 0x85C1E2 });
+      for (const wy of [0.5, 1.05]) {
+        const win = new THREE.Mesh(
+          new THREE.BoxGeometry(0.35, 0.25, 0.05),
+          winMat
+        );
+        win.position.set(0, wy, 0.36);
+        g.add(win);
+        // Frame cross
+        const cross = new THREE.Mesh(
+          new THREE.BoxGeometry(0.04, 0.27, 0.06),
+          new THREE.MeshLambertMaterial({ color: 0xECF0F1 })
+        );
+        cross.position.set(0, wy, 0.36);
+        g.add(cross);
+      }
+
+      // Door (small, bottom)
+      const door = new THREE.Mesh(
+        new THREE.BoxGeometry(0.28, 0.4, 0.05),
+        new THREE.MeshLambertMaterial({ color: 0x6B3F1D })
+      );
+      door.position.set(0, 0.2, 0.36);
+      g.add(door);
+      return g;
+    }
+
+    // ============================================================
+    //  Q版 chibi warehouse — wide low building with red hipped roof
+    //  (inspired by the orange-red warehouse in the original)
+    // ============================================================
+    function makeChibiWarehouse() {
+      const g = new THREE.Group();
+      // Wide low walls
+      const wall = new THREE.Mesh(
+        new THREE.BoxGeometry(1.6, 0.6, 1.0),
+        new THREE.MeshLambertMaterial({ color: 0xD4A574 }) // terracotta
+      );
+      wall.position.y = 0.3;
+      wall.castShadow = true; wall.receiveShadow = true;
+      g.add(wall);
+
+      // Hipped roof — two cones stacked to get a more sloped look
+      const roof = new THREE.Mesh(
+        new THREE.BoxGeometry(1.7, 0.05, 1.1),
+        new THREE.MeshLambertMaterial({ color: 0x922B21, flatShading: true })
+      );
+      roof.position.y = 0.65;
+      roof.castShadow = true;
+      g.add(roof);
+      // Top ridge (small pyramid)
+      const ridge = new THREE.Mesh(
+        new THREE.ConeGeometry(0.6, 0.3, 4),
+        new THREE.MeshLambertMaterial({ color: 0x922B21, flatShading: true })
+      );
+      ridge.position.y = 0.8;
+      ridge.rotation.y = Math.PI / 4;
+      g.add(ridge);
+
+      // Big double door (loading bay)
+      const door = new THREE.Mesh(
+        new THREE.BoxGeometry(0.7, 0.45, 0.05),
+        new THREE.MeshLambertMaterial({ color: 0x4A2E1A })
+      );
+      door.position.set(0, 0.25, 0.52);
+      g.add(door);
+      // Door divider
+      const div = new THREE.Mesh(
+        new THREE.BoxGeometry(0.04, 0.45, 0.06),
+        new THREE.MeshLambertMaterial({ color: 0xD4A574 })
+      );
+      div.position.set(0, 0.25, 0.52);
+      g.add(div);
+
+      // Two small windows on side
+      for (const sx of [-0.55, 0.55]) {
+        const win = new THREE.Mesh(
+          new THREE.BoxGeometry(0.22, 0.2, 0.05),
+          new THREE.MeshLambertMaterial({ color: 0x85C1E2 })
+        );
+        win.position.set(sx, 0.4, 0.52);
+        g.add(win);
+      }
+      return g;
+    }
+
+    // ============================================================
+    //  Q版 chibi hut — small round dome building (variety)
+    // ============================================================
+    function makeChibiHut() {
+      const g = new THREE.Group();
+      // Cylindrical walls
+      const wall = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.5, 0.55, 0.65, 10),
+        new THREE.MeshLambertMaterial({ color: 0xFAD7A0 }) // warm cream
+      );
+      wall.position.y = 0.325;
+      wall.castShadow = true; wall.receiveShadow = true;
+      g.add(wall);
+
+      // Dome roof (hemisphere)
+      const roof = new THREE.Mesh(
+        new THREE.SphereGeometry(0.55, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2),
+        new THREE.MeshLambertMaterial({ color: 0x27AE60, flatShading: true })
+      );
+      roof.position.y = 0.65;
+      roof.castShadow = true;
+      g.add(roof);
+
+      // Tiny chimney on dome (decorative)
+      const chim = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.06, 0.06, 0.18, 6),
+        new THREE.MeshLambertMaterial({ color: 0x7B7D7D })
+      );
+      chim.position.set(0.15, 1.25, 0);
+      g.add(chim);
+
+      // Round door
+      const door = new THREE.Mesh(
+        new THREE.CircleGeometry(0.18, 12),
+        new THREE.MeshLambertMaterial({ color: 0x6B3F1D })
+      );
+      door.position.set(0, 0.25, 0.55);
+      g.add(door);
+
+      // Round window (porthole style)
+      const win = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.11, 0.11, 0.05, 12),
+        new THREE.MeshLambertMaterial({ color: 0x85C1E2 })
+      );
+      win.rotation.x = Math.PI / 2;
+      win.position.set(0, 0.55, 0.55);
+      g.add(win);
+      // Window frame ring
+      const frame = new THREE.Mesh(
+        new THREE.TorusGeometry(0.11, 0.02, 6, 12),
+        new THREE.MeshLambertMaterial({ color: 0x6B3F1D })
+      );
+      frame.position.set(0, 0.55, 0.57);
+      g.add(frame);
+      return g;
+    }
+
+    // ============================================================
+    //  Q版 chibi shop — small shop with striped awning
+    // ============================================================
+    function makeChibiShop() {
+      const g = new THREE.Group();
+      // Walls (slightly narrower than main house)
+      const wall = new THREE.Mesh(
+        new THREE.BoxGeometry(1.0, 0.7, 0.85),
+        new THREE.MeshLambertMaterial({ color: 0xF5CBA7 })
+      );
+      wall.position.y = 0.35;
+      wall.castShadow = true; wall.receiveShadow = true;
+      g.add(wall);
+
+      // Red roof
+      const roof = new THREE.Mesh(
+        new THREE.ConeGeometry(0.78, 0.55, 4),
+        new THREE.MeshLambertMaterial({ color: 0xE74C3C, flatShading: true })
+      );
+      roof.position.y = 0.97;
+      roof.rotation.y = Math.PI / 4;
+      roof.castShadow = true;
+      g.add(roof);
+
+      // Striped awning (over the door)
+      const awningMat1 = new THREE.MeshLambertMaterial({ color: 0xE74C3C });
+      const awningMat2 = new THREE.MeshLambertMaterial({ color: 0xFFFFFF });
+      for (let i = 0; i < 4; i++) {
+        const stripe = new THREE.Mesh(
+          new THREE.BoxGeometry(0.18, 0.02, 0.55),
+          i % 2 === 0 ? awningMat1 : awningMat2
+        );
+        stripe.position.set(-0.27 + i * 0.18, 0.85, 0.48);
+        stripe.rotation.x = -0.3;
+        g.add(stripe);
+      }
+      // Awning front trim
+      const trim = new THREE.Mesh(
+        new THREE.BoxGeometry(0.85, 0.04, 0.05),
+        new THREE.MeshLambertMaterial({ color: 0xC0392B })
+      );
+      trim.position.set(0, 0.7, 0.78);
+      trim.rotation.x = -0.3;
+      g.add(trim);
+
+      // Door
+      const door = new THREE.Mesh(
+        new THREE.BoxGeometry(0.32, 0.5, 0.05),
+        new THREE.MeshLambertMaterial({ color: 0x5D4037 })
+      );
+      door.position.set(0, 0.25, 0.43);
+      g.add(door);
+
+      // Window next to door (shop window)
+      const win = new THREE.Mesh(
+        new THREE.BoxGeometry(0.32, 0.32, 0.05),
+        new THREE.MeshLambertMaterial({ color: 0x85C1E2 })
+      );
+      win.position.set(-0.32, 0.5, 0.43);
+      g.add(win);
+      // Sign (small post sticking up from roof)
+      const post = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.03, 0.03, 0.35, 4),
+        new THREE.MeshLambertMaterial({ color: 0x2C3E50 })
+      );
+      post.position.set(0, 1.4, 0);
+      g.add(post);
+      // Sign board
+      const sign = new THREE.Mesh(
+        new THREE.BoxGeometry(0.35, 0.18, 0.04),
+        new THREE.MeshLambertMaterial({ color: 0xF1C40F })
+      );
+      sign.position.set(0, 1.55, 0);
+      g.add(sign);
+      return g;
+    }
+
+    // ============================================================
     //  Q版 chibi courier character — big head, tiny body
     // ============================================================
     function makeChibiCourier() {
@@ -459,6 +731,30 @@
     const house = makeChibiHouse();
     placeOnPlanet(house, 0.0, 2.2, 0);
 
+    // ---- More buildings to make a little village ----
+    // Tower (left back, tall white)
+    const tower = makeChibiTower();
+    placeOnPlanet(tower, -3.2, -0.4, 1.6);
+
+    // Warehouse (far right, wide terracotta)
+    const warehouse = makeChibiWarehouse();
+    placeOnPlanet(warehouse, 3.0, -1.4, -1.0);
+
+    // Hut (right front, dome with green roof)
+    const hut = makeChibiHut();
+    placeOnPlanet(hut, 1.9, 2.6, -2.2);
+
+    // Shop (left front, with striped awning)
+    const shop = makeChibiShop();
+    placeOnPlanet(shop, -2.5, 2.4, 2.0);
+
+    // Extra trees to fill the village
+    const treeE = makeChibiTree(0.75);
+    placeOnPlanet(treeE, -2.5, -1.8, 0.8);
+
+    const treeF = makeChibiTree(0.85);
+    placeOnPlanet(treeF, 2.6, 1.0, 2.2);
+
     // Two couriers (with subtle idle animation flags)
     const courier1 = makeChibiCourier();
     placeOnPlanet(courier1, -0.2, -0.6, Math.PI * 0.85);
@@ -469,6 +765,174 @@
     placeOnPlanet(courier2, 1.4, -1.6, Math.PI * 0.2);
     courier2.userData.bobPhase = Math.PI;
     courier2.userData.isCourier = true;
+
+    // ============================================================
+    //  Q版 chibi receiver — different colored clothes, stands
+    //  near the house, head tilted up watching the sky. Does
+    //  a little jump when a delivery lands.
+    // ============================================================
+    function makeChibiReceiver() {
+      const g = new THREE.Group();
+      const skin   = new THREE.MeshLambertMaterial({ color: 0xFCD7B6 });
+      const shirt  = new THREE.MeshLambertMaterial({ color: 0xF4B942 }); // yellow
+      const pants  = new THREE.MeshLambertMaterial({ color: 0x8B5A2B }); // brown
+      const cap    = new THREE.MeshLambertMaterial({ color: 0x27AE60 }); // green
+      const shoeM  = new THREE.MeshLambertMaterial({ color: 0x2C3E50 });
+
+      // body
+      const body = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.22, 0.28, 0.45, 8), shirt
+      );
+      body.position.y = 0.45; body.castShadow = true; g.add(body);
+
+      // head, tilted up to watch the sky
+      const head = new THREE.Mesh(
+        new THREE.SphereGeometry(0.38, 14, 12), skin
+      );
+      head.position.y = 1.0;
+      head.rotation.x = -0.35;
+      head.castShadow = true; g.add(head);
+
+      // green beanie cap
+      const capTop = new THREE.Mesh(
+        new THREE.SphereGeometry(0.4, 12, 8, 0, Math.PI*2, 0, Math.PI/2), cap
+      );
+      capTop.position.y = 1.18; g.add(capTop);
+      const brim = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.4, 0.4, 0.06, 12, 1, false, 0, Math.PI), cap
+      );
+      brim.rotation.x = -Math.PI / 2;
+      brim.rotation.z = -Math.PI / 2;
+      brim.position.set(0, 1.18, 0.2);
+      g.add(brim);
+
+      // eyes (slightly higher to match the up-gaze)
+      for (const sx of [-0.13, 0.13]) {
+        const eye = new THREE.Mesh(
+          new THREE.SphereGeometry(0.05, 8, 6),
+          new THREE.MeshLambertMaterial({ color: 0x1a1a1a })
+        );
+        eye.position.set(sx, 1.10, 0.34); g.add(eye);
+      }
+      // smile
+      const smile = new THREE.Mesh(
+        new THREE.BoxGeometry(0.14, 0.025, 0.03),
+        new THREE.MeshLambertMaterial({ color: 0xC0392B })
+      );
+      smile.position.set(0, 0.92, 0.36); g.add(smile);
+
+      // arms
+      for (const sx of [-1, 1]) {
+        const arm = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.08, 0.08, 0.42, 6), shirt
+        );
+        arm.position.set(sx * 0.28, 0.5, 0);
+        arm.rotation.z = sx * 0.25;
+        arm.castShadow = true; g.add(arm);
+        const hand = new THREE.Mesh(
+          new THREE.SphereGeometry(0.09, 8, 6), skin
+        );
+        hand.position.set(sx * 0.32, 0.28, 0.05); g.add(hand);
+      }
+
+      // legs + shoes
+      for (const sx of [-1, 1]) {
+        const leg = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.11, 0.11, 0.3, 6), pants
+        );
+        leg.position.set(sx * 0.12, 0.1, 0);
+        leg.castShadow = true; g.add(leg);
+        const shoe = new THREE.Mesh(
+          new THREE.BoxGeometry(0.2, 0.1, 0.28), shoeM
+        );
+        shoe.position.set(sx * 0.12, -0.05, 0.04); g.add(shoe);
+      }
+      return g;
+    }
+
+    const receiver = makeChibiReceiver();
+    placeOnPlanet(receiver, 1.6, 1.4, Math.PI * 0.45);
+    receiver.userData.isReceiver = true;
+    receiver.userData.baseY = undefined;
+
+    // ============================================================
+    //  Chimney smoke — pool of puffs emitted from the house's
+    //  chimney, parented to planetGroup so they rotate with the
+    //  planet (the smoke stays glued to the chimney no matter
+    //  which side faces the camera).
+    // ============================================================
+    const SMOKE_POOL_SIZE = 24;
+    const smokes = [];
+    for (let i = 0; i < SMOKE_POOL_SIZE; i++) {
+      const m = new THREE.Mesh(
+        new THREE.DodecahedronGeometry(0.40, 0),
+        new THREE.MeshLambertMaterial({
+          color: 0xf2f2f2,
+          transparent: true,
+          opacity: 0.9,
+          flatShading: true,
+          depthWrite: false,
+        })
+      );
+      m.visible = false;
+      m.userData = { vx: 0, vy: 0, vz: 0, life: 0, maxLife: 0, baseScale: 1 };
+      planetGroup.add(m);
+      smokes.push(m);
+    }
+
+    // Chimney top in planetGroup-local coords:
+    //   house placed at (0, 2.2) → y = sqrt(25 - 4.84) - 0.05 ≈ 4.44
+    //   chimney local (relative to house) at (-0.35, 1.35, 0), house rotY=0
+    //   chimney is a 0.18 × 0.35 × 0.18 box → top is at 1.35 + 0.175 = 1.525
+    //   → (-0.35, 4.44 + 1.525, 2.2) = (-0.35, 5.965, 2.2)
+    const CHIMNEY_LOCAL = new THREE.Vector3(-0.35, 5.97, 2.2);
+    let lastSmokeEmit = 0;
+    const SMOKE_INTERVAL = 0.22;  // seconds between puffs
+
+    function emitSmoke(now) {
+      if (now - lastSmokeEmit < SMOKE_INTERVAL) return;
+      lastSmokeEmit = now;
+      for (const s of smokes) {
+        if (s.visible) continue;
+        s.position.set(
+          CHIMNEY_LOCAL.x + (Math.random() - 0.5) * 0.08,
+          CHIMNEY_LOCAL.y + 0.05,
+          CHIMNEY_LOCAL.z + (Math.random() - 0.5) * 0.08
+        );
+        // Drift slightly up + away from the chimney (gentle "lean")
+        s.userData.vx = 0.20 + (Math.random() - 0.5) * 0.3;
+        s.userData.vy = 1.1 + Math.random() * 0.5;
+        s.userData.vz = (Math.random() - 0.5) * 0.3;
+        s.userData.life = 0;
+        s.userData.maxLife = 2.8 + Math.random() * 0.8;
+        s.userData.baseScale = 0.9 + Math.random() * 0.4;
+        s.scale.setScalar(s.userData.baseScale * 0.6);  // start smaller, grow
+        s.material.opacity = 0.9;
+        s.visible = true;
+        return;  // one puff per emit
+      }
+    }
+    function updateSmoke(dt) {
+      for (const s of smokes) {
+        if (!s.visible) continue;
+        s.userData.life += dt;
+        if (s.userData.life >= s.userData.maxLife) {
+          s.visible = false; continue;
+        }
+        s.position.x += s.userData.vx * dt;
+        s.position.y += s.userData.vy * dt;
+        s.position.z += s.userData.vz * dt;
+        s.userData.vx *= 0.985;
+        s.userData.vz *= 0.985;
+        const lifeT = s.userData.life / s.userData.maxLife;
+        // Grow from 0.6× to 2.0× as it rises
+        const grow = 0.6 + lifeT * 1.4;
+        s.scale.setScalar(s.userData.baseScale * grow);
+        // Fade out in the last 30% of life
+        const fade = lifeT < 0.7 ? 1 : 1 - (lifeT - 0.7) / 0.3;
+        s.material.opacity = 0.9 * fade;
+      }
+    }
 
     // Small rocks scattered on top
     for (let i = 0; i < 6; i++) {
@@ -501,18 +965,12 @@
     }
 
     // ============================================================
-    //  Voxel letters "MESSENGER" in a 3x3 grid ABOVE the planet
+    //  Voxel letter pixel grid — used by both the ring layout
+    //  below AND any future pixel-art surfaces.
     // ============================================================
-    const PIXEL = 0.5;
-    const SPACING = 0.6;
-    const ROW_GAP = 0.7;
+    const PIXEL = 0.38;
     const letterW = 5 * PIXEL;
     const letterH = 5 * PIXEL;
-    const GRID = [
-      ['M','E','S'],
-      ['S','E','N'],
-      ['G','E','R'],
-    ];
 
     const letterMat = new THREE.MeshLambertMaterial({
       color: 0xFFFCF2
@@ -521,7 +979,6 @@
       color: 0x1a2632
     });
 
-    const lettersGroup = new THREE.Group();
     const pixelGeo = new THREE.BoxGeometry(PIXEL, PIXEL, PIXEL);
 
     function buildLetter(char, baseX, baseY) {
@@ -562,27 +1019,7 @@
       return g;
     }
 
-    const totalW = 3 * letterW + 2 * SPACING;
-    const totalH = 3 * letterH + 2 * ROW_GAP;
-    const startX = -totalW / 2 + letterW / 2;
-    const startY = totalH / 2 - letterH / 2 + 9.0;  // high above the planet
-
-    const allLetterMeshes = [];
-    for (let row = 0; row < 3; row++) {
-      for (let col = 0; col < 3; col++) {
-        const ch = GRID[row][col];
-        const x = startX + col * (letterW + SPACING);
-        const y = startY - row * (letterH + ROW_GAP);
-        const letterG = buildLetter(ch, x, y);
-        if (letterG) {
-          lettersGroup.add(letterG);
-          letterG.traverse(o => { if (o.isMesh) allLetterMeshes.push(o); });
-        }
-      }
-    }
-    // tilt the whole letter grid slightly forward so it faces the camera better
-    lettersGroup.rotation.x = -0.08;
-    scene.add(lettersGroup);
+    // (Pixel letter ring removed — empty sky above the planet.)
 
     // ============================================================
     //  Drifting clouds (world space, not parented to planet)
@@ -854,10 +1291,7 @@
       // slowly rotate the planet
       planetGroup.rotation.y += dt * 0.15;
 
-      // gentle letter wave
-      for (const m of allLetterMeshes) {
-        m.position.y += Math.sin(t * 1.5 + m.position.x * 0.4) * 0.001;
-      }
+      // (Pixel letter ring removed — nothing to animate here.)
 
       // chibi couriers bob up and down (idle animation)
       for (const c of allCouriers) {
@@ -866,6 +1300,23 @@
           c.position.y = c.userData.baseY + Math.sin(t * 2.5 + c.userData.bobPhase) * 0.05;
         }
       }
+
+      // receiver: idle bob + excited jump on delivered
+      if (receiver.userData.isReceiver) {
+        if (receiver.userData.baseY === undefined) receiver.userData.baseY = receiver.position.y;
+        let yOff = Math.sin(t * 1.8) * 0.03;
+        if (deliveryState === DELIVERY.DELIVERED) {
+          const elapsed = (performance.now() - stateStartTime) / 1000;
+          if (elapsed < 0.55) {
+            yOff += Math.sin(elapsed / 0.55 * Math.PI) * 0.45;
+          }
+        }
+        receiver.position.y = receiver.userData.baseY + yOff;
+      }
+
+      // chimney smoke
+      emitSmoke(t);
+      updateSmoke(dt);
 
       // drift clouds
       for (const c of clouds) {
