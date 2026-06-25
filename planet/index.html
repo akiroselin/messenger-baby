@@ -292,6 +292,7 @@
     //  Scene
     // ============================================================
     const scene = new THREE.Scene();
+    window.scene = scene;  // for headless debug/probe
     scene.background = new THREE.Color(0x4ECDC4);
     scene.fog = new THREE.Fog(0x4ECDC4, 30, 70);
 
@@ -364,7 +365,18 @@
       const r2 = localX * localX + localZ * localZ;
       const y = Math.sqrt(Math.max(0, PLANET_R * PLANET_R - r2));
       group.position.set(localX, y - 0.05, localZ);
-      group.rotation.y = rotY;
+
+      // Orient the group so its local +Y points along the surface normal
+      // (perpendicular to ground, not to world Y). Then rotY spins it
+      // around that local up axis.
+      const surfaceNormal = new THREE.Vector3(localX, y, localZ).normalize();
+      const qUp = new THREE.Quaternion().setFromUnitVectors(
+        new THREE.Vector3(0, 1, 0), surfaceNormal
+      );
+      const qSpin = new THREE.Quaternion().setFromAxisAngle(surfaceNormal, rotY);
+      // qUp first (tilt), then qSpin (rotate around local up)
+      group.quaternion.multiplyQuaternions(qSpin, qUp);
+
       planetGroup.add(group);
     }
 
@@ -1507,17 +1519,21 @@
 
       // (Pixel letter ring removed — nothing to animate here.)
 
-      // chibi couriers bob up and down (idle animation)
+      // chibi couriers bob up and down (idle animation).
+      // translateY moves along the object's local +Y, which is the surface
+      // normal after the placeOnPlanet quaternion tilt — so the character
+      // bobs perpendicular to the local ground, not world up.
       for (const c of allCouriers) {
         if (c.userData.isCourier) {
-          if (c.userData.baseY === undefined) c.userData.baseY = c.position.y;
-          c.position.y = c.userData.baseY + Math.sin(t * 2.5 + c.userData.bobPhase) * 0.05;
+          if (c.userData.basePos === undefined) c.userData.basePos = c.position.clone();
+          c.position.copy(c.userData.basePos);
+          c.translateY(Math.sin(t * 2.5 + c.userData.bobPhase) * 0.05);
         }
       }
 
       // receiver: idle bob + excited jump on delivered
       if (receiver.userData.isReceiver) {
-        if (receiver.userData.baseY === undefined) receiver.userData.baseY = receiver.position.y;
+        if (receiver.userData.basePos === undefined) receiver.userData.basePos = receiver.position.clone();
         let yOff = Math.sin(t * 1.8) * 0.03;
         if (deliveryState === DELIVERY.DELIVERED) {
           const elapsed = (performance.now() - stateStartTime) / 1000;
@@ -1525,7 +1541,8 @@
             yOff += Math.sin(elapsed / 0.55 * Math.PI) * 0.45;
           }
         }
-        receiver.position.y = receiver.userData.baseY + yOff;
+        receiver.position.copy(receiver.userData.basePos);
+        receiver.translateY(yOff);
       }
 
       // chimney smoke
