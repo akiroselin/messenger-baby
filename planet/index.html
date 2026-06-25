@@ -248,7 +248,7 @@
 </head>
 <body>
   <div id="loader"><div class="spinner"></div></div>
-  <div id="hint">drag to orbit · scroll to zoom · <b>WASD</b> keys · <b>Q/E</b> zoom</div>
+  <div id="hint">drag to orbit · scroll to zoom · <b>WASD</b> walk · <b>Q/E</b> zoom</div>
   <div id="hud">
     <div id="status"></div>
     <div id="counter">DELIVERIES · <b>0</b></div>
@@ -907,6 +907,10 @@
     placeOnPlanet(courier1, -0.2, -0.6, Math.PI * 0.85);
     courier1.userData.bobPhase = 0;
     courier1.userData.isCourier = true;
+    // courier1 is the player-controlled character. Track its logical
+    // position on the planet top plane so WASD can walk it around.
+    courier1.userData.lpos = { lx: -0.2, lz: -0.6, faceY: 0 };
+    courier1.userData.basePos = new THREE.Vector3();  // recomputed each frame from lpos
 
     const courier2 = makeChibiCourier();
     placeOnPlanet(courier2, 1.4, -1.6, Math.PI * 0.2);
@@ -1357,19 +1361,76 @@
     const KEY_TILT = 1.1;  // radians/sec for W/S or ↑/↓
     const KEY_ZOOM = 6;    // units/sec for Q/E
     function applyKeyboardCamera(dt) {
-      let dTheta = 0, dPhi = 0, dDist = 0;
-      if (keys['a'] || keys['arrowleft'])  dTheta +=  KEY_ROT * dt;
-      if (keys['d'] || keys['arrowright']) dTheta += -KEY_ROT * dt;
-      if (keys['w'] || keys['arrowup'])    dPhi   += -KEY_TILT * dt;
-      if (keys['s'] || keys['arrowdown'])  dPhi   +=  KEY_TILT * dt;
+      // Q/E zoom only — WASD / arrows are reserved for moving the courier.
+      let dDist = 0;
       if (keys['q']) dDist += -KEY_ZOOM * dt;
       if (keys['e']) dDist +=  KEY_ZOOM * dt;
-      if (dTheta === 0 && dPhi === 0 && dDist === 0) return;
-      camTheta += dTheta;
-      camPhi = Math.max(0.2, Math.min(Math.PI * 0.48, camPhi + dPhi));
+      if (dDist === 0) return;
       camDist = Math.max(10, Math.min(40, camDist + dDist));
       updateCamera();
       noteInteraction();
+    }
+
+    // ============================================================
+    //  Player courier1 movement (WASD / arrows)
+    // ============================================================
+    // Walk speed on the planet surface (units / second in the lpos plane)
+    const COURIER_SPEED = 2.4;
+    const COURIER_MAX_R = PLANET_R * 0.92;  // can't walk past the horizon
+
+    function updateCourier1Movement(dt) {
+      const lp = courier1.userData.lpos;
+      let dx = 0, dz = 0;
+      if (keys['w'] || keys['arrowup'])    dz -= 1;
+      if (keys['s'] || keys['arrowdown'])  dz += 1;
+      if (keys['a'] || keys['arrowleft'])  dx -= 1;
+      if (keys['d'] || keys['arrowright']) dx += 1;
+
+      const moveLen = Math.hypot(dx, dz);
+      const isMoving = moveLen > 0;
+      if (isMoving) {
+        dx /= moveLen;
+        dz /= moveLen;
+        lp.lx += dx * COURIER_SPEED * dt;
+        lp.lz += dz * COURIER_SPEED * dt;
+        // Clamp inside the visible hemisphere (stay on the camera-facing side)
+        const r = Math.hypot(lp.lx, lp.lz);
+        if (r > COURIER_MAX_R) {
+          lp.lx *= COURIER_MAX_R / r;
+          lp.lz *= COURIER_MAX_R / r;
+        }
+        lp.faceY = Math.atan2(-dx, -dz);  // heading in world XZ; see comment below
+        noteInteraction();
+      } else if (lp.faceY === 0 && receiver.userData.basePos) {
+        // First-frame idle default: face the receiver so the user sees
+        // the courier already pointing at their goal.
+        const rec = receiver.userData.basePos;
+        const fx = rec.x - lp.lx, fz = rec.z - lp.lz;
+        const flen = Math.hypot(fx, fz);
+        if (flen > 0.01) lp.faceY = Math.atan2(-fx, -fz);
+      }
+
+      // Recompute world position on the sphere surface.
+      const r2 = lp.lx * lp.lx + lp.lz * lp.lz;
+      const y = Math.sqrt(Math.max(0, PLANET_R * PLANET_R - r2)) - 0.05;
+      courier1.userData.basePos.set(lp.lx, y, lp.lz);
+      courier1.position.copy(courier1.userData.basePos);
+
+      // Build quaternion:
+      //   local +Y -> surface normal (so courier stands on the slope)
+      //   local -Z -> heading direction in world XZ (so courier faces movement)
+      // We use a Basis matrix rather than nested rotations so the heading
+      // is unambiguous regardless of how steep the slope is.
+      const surfaceNormal = new THREE.Vector3(lp.lx, y + 0.05, lp.lz).normalize();
+      const forward = new THREE.Vector3(-Math.sin(lp.faceY), 0, -Math.cos(lp.faceY));
+      // Project forward onto the tangent plane (subtract component along surfaceNormal).
+      const tangentForward = forward.clone()
+        .sub(surfaceNormal.clone().multiplyScalar(forward.dot(surfaceNormal)));
+      if (tangentForward.lengthSq() < 1e-6) tangentForward.set(0, 0, -1);
+      tangentForward.normalize();
+      const right = new THREE.Vector3().crossVectors(tangentForward, surfaceNormal).normalize();
+      const m = new THREE.Matrix4().makeBasis(right, surfaceNormal, tangentForward.clone().negate());
+      courier1.quaternion.setFromRotationMatrix(m);
     }
     // Auto-fade hint after 6s if no keys pressed
     setTimeout(() => {
@@ -1383,40 +1444,19 @@
     const beginBtn = document.getElementById('begin');
     const statusEl = document.getElementById('status');
     const counterEl = document.getElementById('counter').querySelector('b');
-    const checklistEl = document.getElementById('checklist');
-    const clItems = checklistEl.querySelectorAll('li');
-    const clContinue = document.getElementById('cl-continue');
+    // (checklist HTML is still in the markup but no longer wired up —
+    // delivery is now triggered automatically when the player walks the
+    // courier to the receiver.)
+
+    // Delivery: courier1 walks (via WASD) to the receiver. When close
+    // enough, fire confetti, increment the counter, and show a status
+    // for ~2s. The package stays in courier1's built-in hand the whole
+    // time, so no separate "falling package" object is needed.
+    // ============================================================
     let deliveryCount = 0;
-
-    // Checklist helpers
-    function setChecklistStep(activeStep, doneSteps = []) {
-      clItems.forEach((li, i) => {
-        li.classList.toggle('done', doneSteps.includes(i));
-        li.classList.toggle('active', i === activeStep);
-        const b = li.querySelector('.cl-bullet');
-        if (b) b.textContent = doneSteps.includes(i) ? '✓' : String(i + 1);
-      });
-    }
-    function showChecklist() {
-      checklistEl.classList.add('show');
-      clContinue.classList.add('hidden');
-      setChecklistStep(0, []);
-    }
-    function hideChecklist() {
-      checklistEl.classList.remove('show');
-    }
-    clContinue.addEventListener('click', () => {
-      hideChecklist();
-      resetDelivery();
-    });
-
-    // Delivery state machine
-    const DELIVERY = { IDLE: 0, DROPPING: 1, WAVING: 2, DELIVERED: 3, RESET: 4 };
-    let deliveryState = DELIVERY.IDLE;
-    let stateStartTime = 0;
-    let chosenCourier = null;  // which courier receives this package
-    let chosenHand = null;     // the hand mesh to raise
-    let handBaseRotZ = 0.25;   // default arm z rotation
+    let lastDeliveredAt = -Infinity;  // performance.now() / 1000
+    const DELIVER_RADIUS = 1.25;      // lpos-plane distance to trigger
+    const DELIVER_STATUS_DURATION = 2.0;
 
     function setStatus(text, success = false) {
       statusEl.textContent = text;
@@ -1427,77 +1467,26 @@
       statusEl.classList.remove('show');
     }
 
-    // Find a hand to raise (the right hand of chosen courier)
-    function getRightHand(courier) {
-      // right arm + hand are the ones at +x. Walk children: hands are SphereGeometry-named
-      // We can identify by geometry: CylinderGeometry arm vs SphereGeometry hand
-      // Simpler: the right hand is the 5th child-ish mesh (after head, body, cap, etc.)
-      // Even simpler: tag them at build time — but we built courier before this code.
-      // Use position.x > 0.2 to find right-side meshes.
-      let hand = null, arm = null;
-      courier.traverse(o => {
-        if (!o.isMesh) return;
-        if (o.position.x > 0.2 && o.geometry.type === 'SphereGeometry') hand = o;
-        if (o.position.x > 0.2 && o.geometry.type === 'CylinderGeometry') arm = o;
-      });
-      return { hand, arm };
-    }
-
-    function startDelivery() {
-      if (deliveryState !== DELIVERY.IDLE) return;
-      deliveryState = DELIVERY.DROPPING;
-      stateStartTime = performance.now();
-      beginBtn.classList.add('hidden');
-      packageG.visible = true;
-      packageG.position.set(
-        (Math.random() - 0.5) * 4,
-        30, 0
-      );
-      packageG.rotation.set(0, 0, 0);
-      chosenCourier = (Math.random() < 0.5) ? courier1 : courier2;
-      const { hand, arm } = getRightHand(chosenCourier);
-      chosenHand = { hand, arm };
-      setStatus('Delivering…');
-      // Checklist: step 1 (pick up) done, step 2 (in transit) active
-      showChecklist();
-      setChecklistStep(1, [0]);
-    }
-
-    function landPackage() {
-      deliveryState = DELIVERY.WAVING;
-      stateStartTime = performance.now();
-      // burst confetti at the package position
-      burstConfetti(packageG.position);
-      // Checklist: step 2 done, step 3 (hand off) active
-      setChecklistStep(2, [0, 1]);
-    }
-
-    function completeDelivery() {
-      deliveryState = DELIVERY.DELIVERED;
-      stateStartTime = performance.now();
-      deliveryCount++;
-      counterEl.textContent = deliveryCount;
-      setStatus('Delivered! ✦', true);
-      // Checklist: all done, show continue button
-      setChecklistStep(-1, [0, 1, 2, 3]);
-      clContinue.classList.remove('hidden');
-    }
-
-    function resetDelivery() {
-      deliveryState = DELIVERY.IDLE;
-      stateStartTime = 0;
-      packageG.visible = false;
-      // lower the hand back
-      if (chosenHand && chosenHand.arm) {
-        chosenHand.arm.rotation.z = handBaseRotZ;
+    function tryDeliver() {
+      const lp = courier1.userData.lpos;
+      const rec = receiver.userData.basePos;
+      if (!rec) return;
+      const dx = lp.lx - rec.x;
+      const dz = lp.lz - rec.z;
+      const dist = Math.hypot(dx, dz);
+      const now = performance.now() / 1000;
+      if (dist < DELIVER_RADIUS && (now - lastDeliveredAt) > DELIVER_STATUS_DURATION) {
+        lastDeliveredAt = now;
+        deliveryCount++;
+        counterEl.textContent = deliveryCount;
+        setStatus('Delivered! ✦', true);
+        burstConfetti(receiver.position);
       }
-      chosenCourier = null;
-      chosenHand = null;
-      beginBtn.classList.remove('hidden');
-      setTimeout(clearStatus, 1200);
     }
 
-    beginBtn.addEventListener('click', startDelivery);
+    // Hide the BEGIN button — courier1 carries the package from the start,
+    // and delivery is triggered automatically by walking to the receiver.
+    beginBtn.classList.add('hidden');
 
     // ============================================================
     //  Animation loop
@@ -1518,6 +1507,10 @@
 
       // (Pixel letter ring removed — nothing to animate here.)
 
+      // 1) Walk courier1 (player) based on WASD/arrows. This updates
+      //    courier1.userData.basePos + courier1.position + courier1.quaternion.
+      updateCourier1Movement(dt);
+
       // chibi couriers bob up and down (idle animation).
       // translateY moves along the object's local +Y, which is the surface
       // normal after the placeOnPlanet quaternion tilt — so the character
@@ -1530,15 +1523,14 @@
         }
       }
 
-      // receiver: idle bob + excited jump on delivered
+      // receiver: idle bob + excited jump just after a delivery
+      const sinceDelivered = (performance.now() / 1000) - lastDeliveredAt;
+      const isJustDelivered = sinceDelivered >= 0 && sinceDelivered < 0.55;
       if (receiver.userData.isReceiver) {
         if (receiver.userData.basePos === undefined) receiver.userData.basePos = receiver.position.clone();
         let yOff = Math.sin(t * 1.8) * 0.03;
-        if (deliveryState === DELIVERY.DELIVERED) {
-          const elapsed = (performance.now() - stateStartTime) / 1000;
-          if (elapsed < 0.55) {
-            yOff += Math.sin(elapsed / 0.55 * Math.PI) * 0.45;
-          }
+        if (isJustDelivered) {
+          yOff += Math.sin(sinceDelivered / 0.55 * Math.PI) * 0.45;
         }
         receiver.position.copy(receiver.userData.basePos);
         receiver.translateY(yOff);
@@ -1571,11 +1563,11 @@
       // confetti physics
       updateConfetti(dt);
 
-      // WASD / arrow keys (held = continuous orbit/zoom)
+      // Q/E zoom only (WASD/arrows are for courier movement)
       applyKeyboardCamera(dt);
 
       // idle camera auto-rotate (after 4s of no interaction)
-      if (!isDragging && deliveryState === DELIVERY.IDLE) {
+      if (!isDragging) {
         const idleMs = performance.now() - lastInteractionTime;
         if (idleMs > 4000) {
           camTheta -= dt * 0.12;
@@ -1583,41 +1575,11 @@
         }
       }
 
-      // delivery state machine
-      if (deliveryState === DELIVERY.DROPPING) {
-        const elapsed = (performance.now() - stateStartTime) / 1000;
-        const fall = elapsed * 14;
-        packageG.position.y = Math.max(PLANET_R + 0.5, 30 - fall);
-        packageG.rotation.y += dt * 4;
-        packageG.rotation.x += dt * 2;
-        if (packageG.position.y <= PLANET_R + 0.55) {
-          landPackage();
-        }
-      } else if (deliveryState === DELIVERY.WAVING) {
-        const elapsed = (performance.now() - stateStartTime) / 1000;
-        // raise the right arm: rotate.z from 0.25 to -1.5 over 0.4s
-        if (chosenHand && chosenHand.arm) {
-          const k = Math.min(1, elapsed / 0.4);
-          const eased = 1 - Math.pow(1 - k, 3);
-          chosenHand.arm.rotation.z = handBaseRotZ + (-1.5 - handBaseRotZ) * eased;
-        }
-        if (elapsed > 0.6) {
-          completeDelivery();
-        }
-      } else if (deliveryState === DELIVERY.DELIVERED) {
-        const elapsed = (performance.now() - stateStartTime) / 1000;
-        // auto-reset after 5s if user hasn't clicked Continue
-        if (elapsed > 5.0) {
-          hideChecklist();
-          deliveryState = DELIVERY.RESET;
-          stateStartTime = performance.now();
-        }
-      } else if (deliveryState === DELIVERY.RESET) {
-        const elapsed = (performance.now() - stateStartTime) / 1000;
-        if (elapsed > 0.3) {
-          resetDelivery();
-        }
-      }
+      // auto-deliver when courier1 is close enough to the receiver
+      tryDeliver();
+
+      // auto-clear "Delivered!" status after the cooldown
+      if (sinceDelivered > DELIVER_STATUS_DURATION) clearStatus();
 
       renderer.render(scene, camera);
     }
