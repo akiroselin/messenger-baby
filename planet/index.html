@@ -1003,10 +1003,10 @@
     receiver.userData.baseY = undefined;
 
     // ============================================================
-    //  Chimney smoke — pool of puffs emitted from the house's
-    //  chimney, parented to planetGroup so they rotate with the
-    //  planet (the smoke stays glued to the chimney no matter
-    //  which side faces the camera).
+    //  Chimney smoke — pool of puffs parented to the HOUSE group,
+    //  so they inherit the house's surface-tilt quaternion and rise
+    //  along the chimney (house-local +Y = surface normal), not
+    //  world up.
     // ============================================================
     const SMOKE_POOL_SIZE = 24;
     const smokes = [];
@@ -1023,16 +1023,14 @@
       );
       m.visible = false;
       m.userData = { vx: 0, vy: 0, vz: 0, life: 0, maxLife: 0, baseScale: 1 };
-      planetGroup.add(m);
+      house.add(m);   // parented to house → inherits its tilt
       smokes.push(m);
     }
 
-    // Chimney top in planetGroup-local coords:
-    //   house placed at (0, 2.2) → y = sqrt(25 - 4.84) - 0.05 ≈ 4.44
-    //   chimney local (relative to house) at (-0.35, 1.35, 0), house rotY=0
-    //   chimney is a 0.18 × 0.35 × 0.18 box → top is at 1.35 + 0.175 = 1.525
-    //   → (-0.35, 4.44 + 1.525, 2.2) = (-0.35, 5.965, 2.2)
-    const CHIMNEY_LOCAL = new THREE.Vector3(-0.35, 5.97, 2.2);
+    // Chimney top in HOUSE-LOCAL coords:
+    //   chimney is a 0.18 × 0.35 × 0.18 box at house-local (-0.35, 1.35, 0)
+    //   → top at (-0.35, 1.35 + 0.175, 0) = (-0.35, 1.525, 0)
+    const CHIMNEY_LOCAL = new THREE.Vector3(-0.35, 1.55, 0);
     let lastSmokeEmit = 0;
     const SMOKE_INTERVAL = 0.22;  // seconds between puffs
 
@@ -1046,7 +1044,8 @@
           CHIMNEY_LOCAL.y + 0.05,
           CHIMNEY_LOCAL.z + (Math.random() - 0.5) * 0.08
         );
-        // Drift slightly up + away from the chimney (gentle "lean")
+        // Rise along house-local +Y (= surface normal in world),
+        // with a gentle horizontal drift in the house's local XZ frame.
         s.userData.vx = 0.20 + (Math.random() - 0.5) * 0.3;
         s.userData.vy = 1.1 + Math.random() * 0.5;
         s.userData.vz = (Math.random() - 0.5) * 0.3;
