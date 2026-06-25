@@ -72,6 +72,18 @@
       background: rgba(255,255,255,0.4);
       padding: 6px 14px;
       border-radius: 20px;
+      transition: opacity 1.2s;
+    }
+    #hint b {
+      background: #2c3e50;
+      color: #FFE6CC;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      font-size: 12px;
+      letter-spacing: 1px;
+    }
+    #hint.fade { opacity: 0; }
     }
 
     /* ============ HUD: status + counter ============ */
@@ -119,14 +131,137 @@
       transform: translateY(0);
     }
     #status.success { background: #2ECC71; color: white; }
+
+    /* ============ HUD: delivery checklist (chibi paper card) ============ */
+    #checklist {
+      position: fixed;
+      top: 50%; right: 20px;
+      transform: translate(20px, -50%);
+      z-index: 45;
+      pointer-events: none;
+      background: #FFF8E7;
+      border: 3px solid #2c3e50;
+      border-radius: 14px;
+      box-shadow: 0 4px 0 #2c3e50, 0 10px 30px rgba(44,62,80,0.18);
+      padding: 16px 18px 14px;
+      min-width: 220px;
+      max-width: 240px;
+      font-family: inherit;
+      opacity: 0;
+      transition: opacity 0.35s, transform 0.35s;
+    }
+    #checklist.show {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translate(0, -50%);
+    }
+    .cl-header {
+      font-size: 11px;
+      letter-spacing: 2.5px;
+      color: #C0392B;
+      font-weight: 700;
+      text-align: center;
+      padding-bottom: 8px;
+      margin-bottom: 10px;
+      border-bottom: 2px dashed rgba(44,62,80,0.35);
+    }
+    .cl-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 9px;
+    }
+    .cl-list li {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+      color: #2c3e50;
+      letter-spacing: 0.4px;
+      transition: color 0.3s, opacity 0.3s;
+    }
+    .cl-list li.done {
+      color: #7F8C8D;
+      text-decoration: line-through;
+      opacity: 0.65;
+    }
+    .cl-list li.active .cl-bullet {
+      background: #F4B942;
+      border-color: #2c3e50;
+      color: #2c3e50;
+      animation: cl-pulse 1.4s ease-in-out infinite;
+    }
+    .cl-list li.done .cl-bullet {
+      background: #2ECC71;
+      border-color: #2c3e50;
+      color: white;
+    }
+    .cl-bullet {
+      width: 22px; height: 22px;
+      border-radius: 50%;
+      border: 2px solid #2c3e50;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      font-weight: 700;
+      background: white;
+      flex-shrink: 0;
+      transition: background 0.25s, color 0.25s;
+    }
+    @keyframes cl-pulse {
+      0%, 100% { transform: scale(1);   box-shadow: 0 0 0 0 rgba(244,185,66,0.5); }
+      50%      { transform: scale(1.12); box-shadow: 0 0 0 6px rgba(244,185,66,0); }
+    }
+    #cl-continue {
+      display: block;
+      width: 100%;
+      margin-top: 14px;
+      padding: 8px 0;
+      font-family: inherit;
+      font-size: 12px;
+      letter-spacing: 2.5px;
+      font-weight: 700;
+      color: white;
+      background: #2ECC71;
+      border: 2px solid #2c3e50;
+      border-radius: 18px;
+      box-shadow: 0 3px 0 #2c3e50;
+      cursor: pointer;
+      transition: transform 0.1s, box-shadow 0.1s;
+    }
+    #cl-continue:hover { transform: translateY(-1px); box-shadow: 0 4px 0 #2c3e50; }
+    #cl-continue:active { transform: translateY(2px); box-shadow: 0 1px 0 #2c3e50; }
+    #cl-continue.hidden { display: none; }
+    @media (max-width: 640px) {
+      #checklist {
+        right: 12px;
+        min-width: 180px;
+        max-width: 200px;
+        padding: 12px 14px 10px;
+      }
+      .cl-list li { font-size: 12px; }
+    }
   </style>
 </head>
 <body>
   <div id="loader"><div class="spinner"></div></div>
-  <div id="hint">drag to orbit · scroll to zoom</div>
+  <div id="hint">drag to orbit · scroll to zoom · <b>WASD</b> keys · <b>Q/E</b> zoom</div>
   <div id="hud">
     <div id="status"></div>
     <div id="counter">DELIVERIES · <b>0</b></div>
+  </div>
+  <div id="checklist">
+    <div class="cl-header">DELIVERY</div>
+    <ol class="cl-list">
+      <li data-step="0"><span class="cl-bullet">1</span><span class="cl-text">Pick up package</span></li>
+      <li data-step="1"><span class="cl-bullet">2</span><span class="cl-text">In transit</span></li>
+      <li data-step="2"><span class="cl-bullet">3</span><span class="cl-text">Hand off to courier</span></li>
+      <li data-step="3"><span class="cl-bullet">4</span><span class="cl-text">Delivered!</span></li>
+    </ol>
+    <button id="cl-continue" class="hidden">CONTINUE</button>
   </div>
   <button id="begin">BEGIN</button>
 
@@ -1190,12 +1325,79 @@
     }, { passive: false });
 
     // ============================================================
+    //  Keyboard camera control (WASD + arrows + Q/E)
+    // ============================================================
+    const keys = {};
+    window.addEventListener('keydown', e => {
+      const k = e.key.toLowerCase();
+      keys[k] = true;
+      // First keypress: fade out the hint
+      const hint = document.getElementById('hint');
+      if (hint && !hint.classList.contains('fade')) hint.classList.add('fade');
+    });
+    window.addEventListener('keyup', e => {
+      const k = e.key.toLowerCase();
+      keys[k] = false;
+    });
+    // Clear keys if the tab loses focus (avoid stuck-key orbit)
+    window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+
+    const KEY_ROT = 1.6;   // radians/sec for A/D or ←/→
+    const KEY_TILT = 1.1;  // radians/sec for W/S or ↑/↓
+    const KEY_ZOOM = 6;    // units/sec for Q/E
+    function applyKeyboardCamera(dt) {
+      let dTheta = 0, dPhi = 0, dDist = 0;
+      if (keys['a'] || keys['arrowleft'])  dTheta +=  KEY_ROT * dt;
+      if (keys['d'] || keys['arrowright']) dTheta += -KEY_ROT * dt;
+      if (keys['w'] || keys['arrowup'])    dPhi   += -KEY_TILT * dt;
+      if (keys['s'] || keys['arrowdown'])  dPhi   +=  KEY_TILT * dt;
+      if (keys['q']) dDist += -KEY_ZOOM * dt;
+      if (keys['e']) dDist +=  KEY_ZOOM * dt;
+      if (dTheta === 0 && dPhi === 0 && dDist === 0) return;
+      camTheta += dTheta;
+      camPhi = Math.max(0.2, Math.min(Math.PI * 0.48, camPhi + dPhi));
+      camDist = Math.max(10, Math.min(40, camDist + dDist));
+      updateCamera();
+      noteInteraction();
+    }
+    // Auto-fade hint after 6s if no keys pressed
+    setTimeout(() => {
+      const hint = document.getElementById('hint');
+      if (hint && !hint.classList.contains('fade')) hint.classList.add('fade');
+    }, 6000);
+
+    // ============================================================
     //  BEGIN click → full delivery flow
     // ============================================================
     const beginBtn = document.getElementById('begin');
     const statusEl = document.getElementById('status');
     const counterEl = document.getElementById('counter').querySelector('b');
+    const checklistEl = document.getElementById('checklist');
+    const clItems = checklistEl.querySelectorAll('li');
+    const clContinue = document.getElementById('cl-continue');
     let deliveryCount = 0;
+
+    // Checklist helpers
+    function setChecklistStep(activeStep, doneSteps = []) {
+      clItems.forEach((li, i) => {
+        li.classList.toggle('done', doneSteps.includes(i));
+        li.classList.toggle('active', i === activeStep);
+        const b = li.querySelector('.cl-bullet');
+        if (b) b.textContent = doneSteps.includes(i) ? '✓' : String(i + 1);
+      });
+    }
+    function showChecklist() {
+      checklistEl.classList.add('show');
+      clContinue.classList.add('hidden');
+      setChecklistStep(0, []);
+    }
+    function hideChecklist() {
+      checklistEl.classList.remove('show');
+    }
+    clContinue.addEventListener('click', () => {
+      hideChecklist();
+      resetDelivery();
+    });
 
     // Delivery state machine
     const DELIVERY = { IDLE: 0, DROPPING: 1, WAVING: 2, DELIVERED: 3, RESET: 4 };
@@ -1245,6 +1447,9 @@
       const { hand, arm } = getRightHand(chosenCourier);
       chosenHand = { hand, arm };
       setStatus('Delivering…');
+      // Checklist: step 1 (pick up) done, step 2 (in transit) active
+      showChecklist();
+      setChecklistStep(1, [0]);
     }
 
     function landPackage() {
@@ -1252,6 +1457,8 @@
       stateStartTime = performance.now();
       // burst confetti at the package position
       burstConfetti(packageG.position);
+      // Checklist: step 2 done, step 3 (hand off) active
+      setChecklistStep(2, [0, 1]);
     }
 
     function completeDelivery() {
@@ -1260,6 +1467,9 @@
       deliveryCount++;
       counterEl.textContent = deliveryCount;
       setStatus('Delivered! ✦', true);
+      // Checklist: all done, show continue button
+      setChecklistStep(-1, [0, 1, 2, 3]);
+      clContinue.classList.remove('hidden');
     }
 
     function resetDelivery() {
@@ -1285,8 +1495,12 @@
     const allCouriers = [courier1, courier2];
 
     function tick() {
+      // NOTE: must call getDelta() BEFORE getElapsedTime() — three.js Clock
+      // shares an internal "last call" timestamp across both, so calling
+      // getElapsedTime first makes the next getDelta return ~0.
+      let dt = clock.getDelta();
       const t = clock.getElapsedTime();
-      const dt = clock.getDelta();
+      if (dt > 0.1) dt = 0.1;  // clamp huge frames (tab switch)
 
       // slowly rotate the planet
       planetGroup.rotation.y += dt * 0.15;
@@ -1341,6 +1555,9 @@
       // confetti physics
       updateConfetti(dt);
 
+      // WASD / arrow keys (held = continuous orbit/zoom)
+      applyKeyboardCamera(dt);
+
       // idle camera auto-rotate (after 4s of no interaction)
       if (!isDragging && deliveryState === DELIVERY.IDLE) {
         const idleMs = performance.now() - lastInteractionTime;
@@ -1373,8 +1590,9 @@
         }
       } else if (deliveryState === DELIVERY.DELIVERED) {
         const elapsed = (performance.now() - stateStartTime) / 1000;
-        // hide package after 1.2s and reset
-        if (elapsed > 1.4) {
+        // auto-reset after 5s if user hasn't clicked Continue
+        if (elapsed > 5.0) {
+          hideChecklist();
           deliveryState = DELIVERY.RESET;
           stateStartTime = performance.now();
         }
