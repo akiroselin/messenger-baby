@@ -118,6 +118,11 @@
       color: #FFE6CC;
       transform: scale(1.12);
     }
+    #key-debug span.sep {
+      min-width: 8px;
+      padding: 0;
+      background: transparent;
+    }
     }
 
     /* ============ HUD: status + counter ============ */
@@ -282,8 +287,10 @@
 </head>
 <body>
   <div id="loader"><div class="spinner"></div></div>
-  <div id="hint">drag to orbit · scroll to zoom · <b>WASD</b> walk · <b>Q/E</b> zoom</div>
+  <div id="hint">drag to orbit · scroll to zoom · <b>WASD</b> walk · <b>←↑↓→</b> spin planet · <b>Q/E</b> zoom</div>
   <div id="key-debug" aria-hidden="true">
+    <span data-k="arrowup">↑</span><span data-k="arrowleft">←</span><span data-k="arrowdown">↓</span><span data-k="arrowright">→</span>
+    <span class="sep"></span>
     <span data-k="w">W</span><span data-k="a">A</span><span data-k="s">S</span><span data-k="d">D</span>
   </div>
   <div id="hud">
@@ -330,10 +337,12 @@
     // ============================================================
     const scene = new THREE.Scene();
     window.scene = scene;  // for headless debug/probe
+    window.THREE = THREE;  // (also expose THREE so probes can construct Vector3 etc.)
     scene.background = new THREE.Color(0x4ECDC4);
     scene.fog = new THREE.Fog(0x4ECDC4, 30, 70);
 
     const camera = new THREE.PerspectiveCamera(45, innerWidth/innerHeight, 0.1, 200);
+    window.__cam = camera;  // (for headless camera position probing)
     camera.position.set(0, 8, 22);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -1338,12 +1347,20 @@
     let isDragging = false;
     let prevX = 0, prevY = 0;
     let camTheta = 0;
-    let camPhi = Math.PI * 0.38;
-    let camDist = 22;
+    let camPhi = Math.PI * 0.34;   // gentler down-tilt — planet doesn't sink to the bottom
+    let camDist = 14;              // closer so the courier fills more of the frame
     let lastInteractionTime = performance.now();
     const camTarget = new THREE.Vector3(0, 4, 0);
+    // Camera follows courier1 in world space (which itself moves when the
+    // planet rotates, since courier1 is a child of planetGroup). The look-at
+    // point is the courier's chest height — not its feet — so the framing
+    // feels natural.
+    const _camTargetTmp = new THREE.Vector3();
 
     function updateCamera() {
+      courier1.getWorldPosition(_camTargetTmp);
+      _camTargetTmp.y += 0.6;  // chest height
+      camTarget.copy(_camTargetTmp);
       const x = camTarget.x + camDist * Math.sin(camPhi) * Math.sin(camTheta);
       const y = camTarget.y + camDist * Math.cos(camPhi);
       const z = camTarget.z + camDist * Math.sin(camPhi) * Math.cos(camTheta);
@@ -1436,18 +1453,44 @@
       }
     });
 
-    const KEY_ROT = 1.6;   // radians/sec for A/D or ←/→
-    const KEY_TILT = 1.1;  // radians/sec for W/S or ↑/↓
-    const KEY_ZOOM = 6;    // units/sec for Q/E
-    function applyKeyboardCamera(dt) {
-      // Q/E zoom only — WASD / arrows are reserved for moving the courier.
+    const KEY_PLANET_Y = 1.6;   // radians/sec for ←/→
+    const KEY_PLANET_X = 1.1;  // radians/sec for ↑/↓
+    const KEY_ZOOM = 6;        // units/sec for Q/E
+    const PLANET_TILT_MAX = Math.PI * 0.45;
+    function applyKeyboardInput(dt) {
+      let changed = false;
+      // Arrow keys rotate the planet (so the world scrolls around the
+      // courier, who stays centered on screen).
+      if (keys['arrowleft']) {
+        planetGroup.rotation.y += KEY_PLANET_Y * dt;
+        changed = true;
+      }
+      if (keys['arrowright']) {
+        planetGroup.rotation.y -= KEY_PLANET_Y * dt;
+        changed = true;
+      }
+      if (keys['arrowup']) {
+        planetGroup.rotation.x = Math.max(-PLANET_TILT_MAX,
+          planetGroup.rotation.x - KEY_PLANET_X * dt);
+        changed = true;
+      }
+      if (keys['arrowdown']) {
+        planetGroup.rotation.x = Math.min(PLANET_TILT_MAX,
+          planetGroup.rotation.x + KEY_PLANET_X * dt);
+        changed = true;
+      }
+      // Q/E zoom in / out
       let dDist = 0;
       if (keys['q']) dDist += -KEY_ZOOM * dt;
       if (keys['e']) dDist +=  KEY_ZOOM * dt;
-      if (dDist === 0) return;
-      camDist = Math.max(10, Math.min(40, camDist + dDist));
-      updateCamera();
-      noteInteraction();
+      if (dDist !== 0) {
+        camDist = Math.max(8, Math.min(40, camDist + dDist));
+        changed = true;
+      }
+      if (changed) {
+        updateCamera();
+        noteInteraction();
+      }
     }
 
     // ============================================================
@@ -1460,10 +1503,12 @@
     function updateCourier1Movement(dt) {
       const lp = courier1.userData.lpos;
       let dx = 0, dz = 0;
-      if (keys['w'] || keys['arrowup'])    dz -= 1;
-      if (keys['s'] || keys['arrowdown'])  dz += 1;
-      if (keys['a'] || keys['arrowleft'])  dx -= 1;
-      if (keys['d'] || keys['arrowright']) dx += 1;
+      // WASD only — arrow keys are reserved for rotating the planet
+      // (so the user can spin the world without walking).
+      if (keys['w']) dz -= 1;
+      if (keys['s']) dz += 1;
+      if (keys['a']) dx -= 1;
+      if (keys['d']) dx += 1;
 
       const moveLen = Math.hypot(dx, dz);
       const isMoving = moveLen > 0;
@@ -1581,14 +1626,21 @@
       const t = clock.getElapsedTime();
       if (dt > 0.1) dt = 0.1;  // clamp huge frames (tab switch)
 
-      // slowly rotate the planet
-      planetGroup.rotation.y += dt * 0.15;
+      // (Planet auto-rotate removed — the user now spins the planet with
+      // arrow keys, and walks the courier with WASD. The camera follows
+      // the courier, so the world scrolls around them.)
 
-      // (Pixel letter ring removed — nothing to animate here.)
-
-      // 1) Walk courier1 (player) based on WASD/arrows. This updates
+      // 1) Walk courier1 (player) based on WASD. This updates
       //    courier1.userData.basePos + courier1.position + courier1.quaternion.
       updateCourier1Movement(dt);
+
+      // 2) Spin the planet (arrow keys) and zoom (Q/E).
+      applyKeyboardInput(dt);
+
+      // 3) Camera always tracks the courier — must run after both
+      //    planet rotation (arrow keys move the courier in world space
+      //    since courier1 is a child of planetGroup) and courier movement.
+      updateCamera();
 
       // chibi couriers bob up and down (idle animation).
       // translateY moves along the object's local +Y, which is the surface
@@ -1641,18 +1693,6 @@
 
       // confetti physics
       updateConfetti(dt);
-
-      // Q/E zoom only (WASD/arrows are for courier movement)
-      applyKeyboardCamera(dt);
-
-      // idle camera auto-rotate (after 4s of no interaction)
-      if (!isDragging) {
-        const idleMs = performance.now() - lastInteractionTime;
-        if (idleMs > 4000) {
-          camTheta -= dt * 0.12;
-          updateCamera();
-        }
-      }
 
       // auto-deliver when courier1 is close enough to the receiver
       tryDeliver();
