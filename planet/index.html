@@ -84,6 +84,40 @@
       letter-spacing: 1px;
     }
     #hint.fade { opacity: 0; }
+
+    /* Tiny on-screen key indicator so you can tell at a glance whether
+       the page is receiving your keystrokes. Lights up the matching
+       letter when the key is currently held. */
+    #key-debug {
+      position: fixed;
+      bottom: 18px; left: 50%;
+      transform: translateX(-50%);
+      z-index: 50;
+      pointer-events: none;
+      display: flex;
+      gap: 6px;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      font-size: 12px;
+      letter-spacing: 1px;
+      opacity: 0.35;
+      transition: opacity 0.2s;
+    }
+    #key-debug.hot { opacity: 0.95; }
+    #key-debug span {
+      display: inline-block;
+      min-width: 22px;
+      padding: 4px 8px;
+      text-align: center;
+      background: rgba(255,255,255,0.4);
+      color: #2c3e50;
+      border-radius: 4px;
+      transition: background 0.08s, color 0.08s, transform 0.08s;
+    }
+    #key-debug span.on {
+      background: #2c3e50;
+      color: #FFE6CC;
+      transform: scale(1.12);
+    }
     }
 
     /* ============ HUD: status + counter ============ */
@@ -249,6 +283,9 @@
 <body>
   <div id="loader"><div class="spinner"></div></div>
   <div id="hint">drag to orbit · scroll to zoom · <b>WASD</b> walk · <b>Q/E</b> zoom</div>
+  <div id="key-debug" aria-hidden="true">
+    <span data-k="w">W</span><span data-k="a">A</span><span data-k="s">S</span><span data-k="d">D</span>
+  </div>
   <div id="hud">
     <div id="status"></div>
     <div id="counter">DELIVERIES · <b>0</b></div>
@@ -1343,19 +1380,61 @@
     //  Keyboard camera control (WASD + arrows + Q/E)
     // ============================================================
     const keys = {};
+    // Map common physical / logical key names to the names we look up
+    // later (e.key or e.code, both lowercased). This way Dvorak / AZERTY
+    // / Colemak users get the same WASD binding as QWERTY users.
+    const KEY_ALIASES = {
+      'w': 'w', 'arrowup': 'arrowup',
+      'a': 'a', 'arrowleft': 'arrowleft',
+      's': 's', 'arrowdown': 'arrowdown',
+      'd': 'd', 'arrowright': 'arrowright',
+      'q': 'q', 'e': 'e',
+      'keyw': 'w', 'keya': 'a', 'keys': 's', 'keyd': 'd',
+      'keyq': 'q', 'keye': 'e',
+    };
+    const keyDebugEl = document.getElementById('key-debug');
+    const keyDebugMap = {};
+    if (keyDebugEl) {
+      keyDebugEl.querySelectorAll('span[data-k]').forEach(s => {
+        keyDebugMap[s.getAttribute('data-k')] = s;
+      });
+    }
+    function setKeyOn(name, on) {
+      const norm = KEY_ALIASES[name];
+      if (!norm) return;
+      keys[norm] = on;
+      // Also keep the raw form (so e.g. "w" and "keyw" both still find the key)
+      if (norm !== name) keys[name] = on;
+      // Update the on-screen debug indicator
+      const span = keyDebugMap[norm];
+      if (span) {
+        if (on) span.classList.add('on'); else span.classList.remove('on');
+      }
+      if (keyDebugEl) keyDebugEl.classList.toggle('hot', on);
+    }
     window.addEventListener('keydown', e => {
       const k = e.key.toLowerCase();
-      keys[k] = true;
+      const c = e.code.toLowerCase();
+      setKeyOn(k, true);
+      setKeyOn(c, true);
       // First keypress: fade out the hint
       const hint = document.getElementById('hint');
       if (hint && !hint.classList.contains('fade')) hint.classList.add('fade');
     });
     window.addEventListener('keyup', e => {
       const k = e.key.toLowerCase();
-      keys[k] = false;
+      const c = e.code.toLowerCase();
+      setKeyOn(k, false);
+      setKeyOn(c, false);
     });
     // Clear keys if the tab loses focus (avoid stuck-key orbit)
-    window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+    window.addEventListener('blur', () => {
+      for (const k in keys) keys[k] = false;
+      if (keyDebugEl) {
+        keyDebugEl.classList.remove('hot');
+        keyDebugEl.querySelectorAll('span.on').forEach(s => s.classList.remove('on'));
+      }
+    });
 
     const KEY_ROT = 1.6;   // radians/sec for A/D or ←/→
     const KEY_TILT = 1.1;  // radians/sec for W/S or ↑/↓
